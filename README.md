@@ -18,11 +18,7 @@ A Modular ESP32-S3 Stream Deck & Robotics Control Hub
 
 ## 🎬 Cinematic Demo
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=pzVF0-tMvuY">
-    <img src="https://img.youtube.com/vi/pzVF0-tMvuY/maxresdefault.jpg" width="900">
-  </a>
-</p>
+https://github.com/user-attachments/assets/KoreDeck.mp4
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=pzVF0-tMvuY">
