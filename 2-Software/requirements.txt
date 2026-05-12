@@ -1,0 +1,8 @@
+pyserial==3.5
+psutil==5.9.8
+pycaw==20230901
+comtypes==1.4.1
+pyautogui==0.9.54
+winsdk==1.0.0b10
+screen-brightness-control==0.23.0
+requests==2.31.0
