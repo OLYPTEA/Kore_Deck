@@ -1,28 +1,27 @@
 #pragma once
-// =============================================================================
-// protocol.h — Protocole de communication ASCII ESP32 ↔ PC
+
+// protocol.h, Protocole de communication ASCII ESP32 <=> PC
 //
-// FORMAT TRAME PC → ESP32 (données système, envoyée toutes les 100ms) :
+// FORMAT TRAME PC -> ESP32 (données système, envoyée toutes les 100ms) :
 //   CPU:34|RAM:11.2|TRACK:Artist - Title|FPS:144|MIC:0|DND:1|OBS:1|POMO:24:13:3\n
 //
-// FORMAT TRAME ESP32 → PC (événements, envoyée à la demande) :
+// FORMAT TRAME ESP32 -> PC (événements, envoyée à la demande) :
 //   ACTION:MEDIA_PLAY\n
 //   POT:VOL_MASTER:72\n
 //   CAT:2\n
 //   PING\n
 //
-// RÈGLES :
+// ATTENTION (important) :
 //   - Chaque trame se termine par '\n'
 //   - Les champs sont séparés par '|'
 //   - Les valeurs sont séparées de leur clé par ':'
-// =============================================================================
 
 #include <Arduino.h>
 #include "config.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
+
 /// @brief Structure des données reçues du PC
-// ─────────────────────────────────────────────────────────────────────────────
+
 struct PCData {
     uint8_t  cpuUsage      = 0;
     float    ramUsage      = 0.0f;
@@ -37,10 +36,10 @@ struct PCData {
     bool     valid         = false; ///< true si la dernière trame était valide
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
+
 /// @brief Actions envoyées par l'ESP32 vers le PC
 /// Nommage : CATÉGORIE_ACTION
-// ─────────────────────────────────────────────────────────────────────────────
+
 namespace Action {
     // HOME
     constexpr char MEDIA_PLAY[]       = "MEDIA_PLAY";
@@ -79,9 +78,9 @@ namespace Action {
     constexpr char TASK_MANAGER[]     = "TASK_MANAGER";
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+
 /// @brief Actions des potentiomètres par catégorie
-// ─────────────────────────────────────────────────────────────────────────────
+
 namespace PotAction {
     constexpr char VOL_MASTER[]       = "VOL_MASTER";
     constexpr char VOL_MUSIC[]        = "VOL_MUSIC";
@@ -96,9 +95,9 @@ namespace PotAction {
     constexpr char VOL_DISCORD[]      = "VOL_DISCORD";
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/// @brief Mapping bouton → action par catégorie [catégorie][bouton]
-// ─────────────────────────────────────────────────────────────────────────────
+
+/// @brief Mapping bouton -> action par catégorie [catégorie][bouton]
+
 static const char* BTN_ACTIONS[CATEGORY_COUNT][BTN_COUNT] = {
     // HOME
     {Action::MEDIA_PLAY, Action::MEDIA_NEXT, Action::MEDIA_PREV,
@@ -117,9 +116,9 @@ static const char* BTN_ACTIONS[CATEGORY_COUNT][BTN_COUNT] = {
      Action::TASK_MANAGER}
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-/// @brief Mapping potentiomètre → action par catégorie [catégorie][pot]
-// ─────────────────────────────────────────────────────────────────────────────
+
+/// @brief Mapping potentiomètre -> action par catégorie [catégorie][pot]
+
 static const char* POT_ACTIONS[CATEGORY_COUNT][POT_COUNT] = {
     // HOME
     {PotAction::VOL_MASTER, PotAction::VOL_MUSIC,
@@ -135,17 +134,17 @@ static const char* POT_ACTIONS[CATEGORY_COUNT][POT_COUNT] = {
      PotAction::VOL_DISCORD, PotAction::VOL_MUSIC}
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-/// @brief Parseur de trames PC → ESP32
-// ─────────────────────────────────────────────────────────────────────────────
+
+/// @brief Parseur de trames PC -> ESP32
+
 class FrameParser {
 public:
-    // -------------------------------------------------------------------------
+    
     /// @brief Parse une trame complète reçue du PC
     /// @param line Trame brute (sans le '\n')
     /// @param out  Structure de sortie
     /// @return true si la trame est valide et complète
-    // -------------------------------------------------------------------------
+  
     static bool parse(const char* line, PCData& out) {
         if (!line || strlen(line) < 5) return false;
 

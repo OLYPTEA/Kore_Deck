@@ -1,6 +1,6 @@
-# =============================================================================
+
 # config.py — Configuration centralisée de l'agent PC StreamDeck
-# =============================================================================
+
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -18,7 +18,7 @@ class SerialConfig:
 @dataclass
 class TimingConfig:
     """Intervalles des tâches périodiques (secondes)."""
-    send_interval: float    = 0.1      # Envoi trame système → ESP32 (100ms)
+    send_interval: float    = 0.1      # Envoi trame système -> ESP32 (100ms), à priori pas besoin d'être plus rapide on verra à l'usage
     spotify_interval: float = 2.0      # Rafraîchissement titre Spotify
     fps_interval: float     = 1.0      # Rafraîchissement FPS via HWiNFO
 
@@ -58,3 +58,7 @@ class AppConfig:
 
 # Instance globale importable partout
 config = AppConfig()
+
+# ça pourrait être intéressant de pouvoir charger une config depuis un fichier JSON ou YAML à terme, 
+# mais pour l'instant on hardcode tout ça dans le code, c'est plus simple pour le développement et 
+# ça évite d'avoir à gérer la sérialisation/désérialisation. (On peut toujours ajouter ça plus tard si besoin)

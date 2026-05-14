@@ -1,11 +1,10 @@
-# =============================================================================
-# agent.py — Agent PC principal du StreamDeck DIY
+# agent.py — Agent PC principal de Kore Deck
 #
 # Point d'entrée unique. Orchestre tous les modules :
-#   - SerialManager    : communication ESP32 ↔ PC
+#   - SerialManager    : communication ESP32 <=> PC
 #   - SystemMonitor    : CPU, RAM, FPS
 #   - SpotifyMonitor   : titre en cours de lecture
-#   - AudioManager     : volumes et microphone
+#   - AudioManager     : volumes et micro
 #   - PomodoroTimer    : minuteur Pomodoro
 #   - ActionExecutor   : exécution des actions boutons/potards
 #
@@ -13,7 +12,15 @@
 #   python agent.py
 #   python agent.py --port COM5
 #   python agent.py --port COM3 --debug
-# =============================================================================
+
+
+"""
+Configuration requise (config.py) :
+- serial: port (str), baud (int)
+- timing: spotify_interval, fps_interval, send_interval (float)
+- log_level: (str) "INFO", "DEBUG"...
+"""
+
 
 import argparse
 import signal
@@ -40,14 +47,14 @@ class StreamDeckAgent:
     """
 
     def __init__(self) -> None:
-        # --- Modules métier
+        #  Modules métier
         self._system    = SystemMonitor()
         self._spotify   = SpotifyMonitor()
         self._audio     = AudioManager()
         self._pomodoro  = PomodoroTimer()
         self._executor  = ActionExecutor(self._audio, self._pomodoro)
 
-        # --- Communication série
+        #  Communication série
         self._serial    = SerialManager(on_line_received=self._on_line_received)
 
         # --- État interne
@@ -56,22 +63,22 @@ class StreamDeckAgent:
         self._dnd_active        : bool = False
         self._obs_active        : bool = False
 
-        # --- Timings pour les tâches périodiques lentes
+        #  Timings pour les tâches périodiques lentes
         self._last_send_time    : float = 0.0
         self._last_spotify_time : float = 0.0
         self._last_fps_time     : float = 0.0
 
-        # --- Cache des données lentes (mises à jour moins souvent)
+        #  Cache des données lentes (mises à jour moins souvent)
         self._cached_track      : str   = "Aucune lecture"
         self._cached_fps        : int   = 0
 
-        # --- Arrêt propre
+        #  Arrêt
         self._running           : bool  = False
         self._stop_event        = threading.Event()
 
-    # =========================================================================
-    # Cycle de vie
-    # =========================================================================
+    
+    # Cycle de vie 
+   
 
     def start(self) -> None:
         """Démarre l'agent et entre dans la boucle principale."""
@@ -96,9 +103,9 @@ class StreamDeckAgent:
         self._serial.stop()
         log.info("Agent arrêté proprement")
 
-    # =========================================================================
+    
     # Boucle principale
-    # =========================================================================
+    
 
     def _main_loop(self) -> None:
         """
@@ -108,37 +115,37 @@ class StreamDeckAgent:
         while self._running and not self._stop_event.is_set():
             now = time.monotonic()
 
-            # --- Tâche 1 : Mise à jour Pomodoro (toutes les itérations)
+            #  Tâche 1 : Mise à jour Pomodoro (toutes les itérations)
             self._pomodoro.update()
 
-            # --- Tâche 2 : Rafraîchissement titre Spotify (toutes les 2s)
+            #  Tâche 2 : Rafraîchissement titre Spotify (toutes les 2s)
             if now - self._last_spotify_time >= config.timing.spotify_interval:
                 self._last_spotify_time = now
                 self._cached_track = self._spotify.get_current_track()
 
-            # --- Tâche 3 : Rafraîchissement FPS (toutes les 1s)
+            #  Tâche 3 : Rafraîchissement FPS (toutes les 1s)
             if now - self._last_fps_time >= config.timing.fps_interval:
                 self._last_fps_time = now
                 self._cached_fps = self._system.get_fps()
 
-            # --- Tâche 4 : Envoi trame système → ESP32 (toutes les 100ms)
+            #  Tâche 4 : Envoi trame système → ESP32 (toutes les 100ms)
             if now - self._last_send_time >= config.timing.send_interval:
                 self._last_send_time = now
                 if self._serial.is_connected():
                     self._send_system_frame()
 
-            time.sleep(0.005)  # ~200 Hz max
+            time.sleep(0.005)  # empêche la boucle de tourner à 100% CPU, mais ça reste très réactif (200 Hz)
 
-    # =========================================================================
-    # Construction et envoi de la trame système
-    # =========================================================================
+    
+    # Construction et envoi de la trame système (note à moi même : à voir si on peut faire mieux que 100ms, genre 50ms ?) -> à tester, mais je pense que 100ms c'est déjà très fluide et ça laisse plus de temps pour les autres tâches
+    # Attention risque de saturer si on envoie trop vite et que l'ESP32 n'arrive pas à suivre, d'où l'idée de faire du 50ms seulement si l'écran (DWIN/Nextion) suit, sinon rester à 100ms pour éviter les pertes de trames
 
     def _send_system_frame(self) -> None:
         """
         Construit et envoie la trame ASCII vers l'ESP32.
-        Format : CPU:34|RAM:11.2|TRACK:Artist - Title|FPS:144|MIC:0|DND:1|OBS:1|POMO:24:13:3
+        Format : CPU:34|RAM:11.2|TRACK:Artist - Title|FPS:144|MIC:0|DND:1|OBS:1|POMO:24:13:3     
         """
-        cpu  = self._system.get_cpu_usage()
+        cpu  = self._system.get_cpu_usage()  
         ram  = self._system.get_ram_usage()
         mins, secs = self._pomodoro.get_remaining()
         sess = self._pomodoro.get_session_count()
@@ -157,9 +164,9 @@ class StreamDeckAgent:
         self._serial.send(frame)
         log.debug(f"→ ESP32 : {frame}")
 
-    # =========================================================================
+   
     # Réception des trames ESP32 → PC
-    # =========================================================================
+   
 
     def _on_line_received(self, line: str) -> None:
         """
@@ -199,9 +206,9 @@ class StreamDeckAgent:
             log.debug(f"Trame non reconnue : {line}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+
 # Point d'entrée
-# ─────────────────────────────────────────────────────────────────────────────
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -244,3 +251,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# --- TODO pour le prochain dev <3 ---
+# 1  Passer l'envoi de la trame à 50ms si l'écran (DWIN/Nextion) suit.
+# 2  Ajouter une vérification (checksum) sur les trames reçues de l'ESP32.
+# 3  Permettre le changement de catégorie (CAT) via le clavier du PC.

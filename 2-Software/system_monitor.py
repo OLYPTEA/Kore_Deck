@@ -1,11 +1,11 @@
-# =============================================================================
+
 # system_monitor.py — Monitoring des ressources système
 #
 # Données collectées :
 #   - CPU usage (%)
 #   - RAM usage (%)
-#   - FPS via HWiNFO shared memory (optionnel, retourne 0 si absent)
-# =============================================================================
+#   - FPS via HWiNFO shared memory (optionnel, retourne 0 si absent
+
 
 import ctypes
 import struct
@@ -134,3 +134,5 @@ class SystemMonitor:
 
         finally:
             kernel32.CloseHandle(handle)
+
+# TODO: Ajouter des méthodes pour d'autres capteurs HWiNFO (températures, fréquences, etc.) si besoin.

@@ -1,6 +1,7 @@
-# =============================================================================
+
 # logger.py — Logging centralisé avec rotation de fichier
-# =============================================================================
+# note: ce module est conçu pour être importé et utilisé globalement dans l'application 
+
 
 import logging
 import sys
@@ -22,24 +23,24 @@ def setup_logger(name: str = "streamdeck", level: str = "INFO") -> logging.Logge
     if logger.handlers:
         return logger  # Déjà configuré
 
-    # --- Formatter console (lisible)
+    #  Formatter console (lisible)
     console_fmt = logging.Formatter(
         fmt="[%(asctime)s] %(levelname)-8s %(message)s",
         datefmt="%H:%M:%S"
     )
 
-    # --- Formatter fichier (détaillé)
+    #  Formatter fichier (détaillé)
     file_fmt = logging.Formatter(
         fmt="%(asctime)s | %(levelname)-8s | %(module)-20s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
 
-    # --- Handler console
+    #  Handler console
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(console_fmt)
     console_handler.setLevel(logging.DEBUG)
 
-    # --- Handler fichier rotatif
+    #  Handler fichier rotatif
     log_path = Path(__file__).parent / "streamdeck.log"
     file_handler = RotatingFileHandler(
         log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
@@ -55,3 +56,6 @@ def setup_logger(name: str = "streamdeck", level: str = "INFO") -> logging.Logge
 
 # Logger global importable
 log = setup_logger()
+
+#TODO: ajouter une fonction de test pour vérifier que le logger fonctionne correctement.
+

@@ -1,6 +1,6 @@
-# =============================================================================
-# action_executor.py — Exécution des actions reçues depuis l'ESP32
-# =============================================================================
+# action_executor.py, Exécution des actions reçues depuis l'ESP32
+# 4 catégories d'actions : HOME, 3D MAKING, FOCUS, GAME
+
 
 import subprocess
 import pyautogui
@@ -24,9 +24,9 @@ class ActionExecutor:
         self._audio    = audio
         self._pomodoro = pomodoro
 
-    # =========================================================================
+   
     # Dispatch principal
-    # =========================================================================
+   
 
     def execute_action(self, action: str) -> None:
         """Reçoit une chaîne ACTION:XXX et dispatche vers le bon handler."""
@@ -52,9 +52,9 @@ class ActionExecutor:
         else:
             log.warning(f"Action pot inconnue : {pot_action}")
 
-    # =========================================================================
+    
     # Actions HOME
-    # =========================================================================
+   
 
     def _media_play(self)       : pyautogui.press('playpause')
     def _media_next(self)       : pyautogui.press('nexttrack')
@@ -71,9 +71,9 @@ class ActionExecutor:
             shell=True
         )
 
-    # =========================================================================
+    
     # Actions 3D MAKING
-    # =========================================================================
+    
 
     def _undo(self)             : pyautogui.hotkey('ctrl', 'z')
     def _redo(self)             : pyautogui.hotkey('ctrl', 'y')
@@ -84,9 +84,9 @@ class ActionExecutor:
     def _export_stl(self):
         pyautogui.hotkey('ctrl', 'shift', 'e')
 
-    # =========================================================================
+    
     # Actions FOCUS
-    # =========================================================================
+    
 
     def _pomo_toggle(self)      : self._pomodoro.toggle()
     def _pomo_reset(self)       : self._pomodoro.reset()
@@ -100,10 +100,9 @@ class ActionExecutor:
     def _snap_right(self)       : pyautogui.hotkey('win', 'right')
     def _next_vdesktop(self)    : pyautogui.hotkey('ctrl', 'win', 'right')
 
-    # =========================================================================
+   
     # Actions GAME
-    # =========================================================================
-
+    
     def _game_mic(self)         : self._audio.toggle_mic_mute()
     def _discord_mute(self)     : pyautogui.hotkey('ctrl', 'shift', 'm')
     def _game_screenshot(self)  : pyautogui.press('f12')          # Steam
@@ -113,9 +112,9 @@ class ActionExecutor:
     def _alt_tab(self)          : pyautogui.hotkey('alt', 'tab')
     def _task_manager(self)     : pyautogui.hotkey('ctrl', 'shift', 'esc')
 
-    # =========================================================================
+    
     # Potentiomètres
-    # =========================================================================
+    
 
     def _pot_vol_master(self, v: int)   : self._audio.set_master_volume(v)
     def _pot_vol_music(self, v: int)    : self._audio.set_spotify_volume(v)
@@ -126,7 +125,7 @@ class ActionExecutor:
             log.warning(f"Luminosité : {e}")
     def _pot_mic_gain(self, v: int)     : self._audio.set_mic_gain(v)
     def _pot_zoom(self, v: int):
-        # Fusion 360 : Ctrl+scroll simulé
+        # Fusion 360 : Ctrl+scroll pour zoomer
         import time
         steps = int((v - 50) / 10)
         if steps > 0:
@@ -147,10 +146,9 @@ class ActionExecutor:
     def _pot_vol_game(self, v: int)     : self._audio.set_game_volume(v)
     def _pot_vol_discord(self, v: int)  : self._audio.set_discord_volume(v)
 
-    # =========================================================================
+    
     # Tables de dispatch
-    # =========================================================================
-
+    
     _ACTION_MAP = {
         "MEDIA_PLAY"      : _media_play,
         "MEDIA_NEXT"      : _media_next,

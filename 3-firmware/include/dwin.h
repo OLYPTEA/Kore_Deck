@@ -1,5 +1,5 @@
 #pragma once
-// =============================================================================
+
 // dwin.h — Interface avec l'écran DWIN DMG96240C037_03W (T5L DGUS II)
 //
 // Protocole UART : 5A A5 [len] [cmd] [VP_H] [VP_L] [data...]
@@ -8,7 +8,7 @@
 // Encodage string   : 2 octets/char (0x00 + ASCII pour Latin)
 //
 // Connexion : UART1, IO16(RX), IO17(TX), via level-shifter BSS138
-// =============================================================================
+
 
 #include <Arduino.h>
 #include <HardwareSerial.h>
@@ -18,35 +18,35 @@ class DwinDisplay {
 public:
     DwinDisplay() : _serial(DWIN_UART_NUM) {}
 
-    // -------------------------------------------------------------------------
+   
     /// @brief Initialisation de l'UART DWIN
-    // -------------------------------------------------------------------------
+   
     void begin() {
         _serial.begin(DWIN_BAUD, SERIAL_8N1, DWIN_RX_PIN, DWIN_TX_PIN);
         delay(200); // Délai de boot écran
     }
 
-    // -------------------------------------------------------------------------
+    
     /// @brief Changement de page DWIN
     /// @param page Numéro de page (0-4)
-    // -------------------------------------------------------------------------
+   
     void setPage(uint8_t page) {
         _writeInt(0x0084, page);
     }
 
-    // -------------------------------------------------------------------------
+    
     /// @brief Écriture d'un entier 16 bits à une adresse VP
-    // -------------------------------------------------------------------------
+   
     void writeInt(uint16_t vp, int16_t value) {
         _writeInt(vp, value);
     }
 
-    // -------------------------------------------------------------------------
+    
     /// @brief Écriture d'une chaîne ASCII à une adresse VP
     /// @param vp       Adresse VP cible
     /// @param str      Chaîne à écrire (terminée par \0)
     /// @param maxChars Nombre maximum de caractères à écrire
-    // -------------------------------------------------------------------------
+    
     void writeString(uint16_t vp, const char* str, uint8_t maxChars) {
         if (!str) return;
 
@@ -75,18 +75,18 @@ public:
         _serial.write(frame, i);
     }
 
-    // -------------------------------------------------------------------------
+    
     /// @brief Met à jour les 4 barres de progression potentiomètres
-    // -------------------------------------------------------------------------
+   
     void updatePotValues(const uint8_t values[POT_COUNT]) {
         for (uint8_t i = 0; i < POT_COUNT; ++i) {
             _writeInt(VP_POT_VAL[i], values[i]);
         }
     }
 
-    // -------------------------------------------------------------------------
+    
     /// @brief Met à jour les labels des potentiomètres selon la catégorie
-    // -------------------------------------------------------------------------
+    
     void updatePotLabels(Category cat) {
         static const char* labels[CATEGORY_COUNT][POT_COUNT] = {
             // HOME
@@ -105,10 +105,10 @@ public:
         }
     }
 
-    // -------------------------------------------------------------------------
+    
     /// @brief Lit les données disponibles (réponse tactile écran)
     /// @return Octet lu, ou -1 si rien disponible
-    // -------------------------------------------------------------------------
+    
     int read() {
         return _serial.read();
     }
@@ -120,9 +120,9 @@ public:
 private:
     HardwareSerial _serial;
 
-    // -------------------------------------------------------------------------
+    
     /// @brief Envoi d'un entier 16 bits (commande interne)
-    // -------------------------------------------------------------------------
+    
     void _writeInt(uint16_t vp, int16_t value) {
         uint8_t frame[7] = {
             0x5A, 0xA5,

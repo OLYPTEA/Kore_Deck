@@ -1,10 +1,10 @@
-# =============================================================================
-# spotify_monitor.py — Lecture du titre Spotify via Windows Media Session API
+
+# spotify_monitor.py, Lecture du titre Spotify via Windows Media Session API
 #
-# Utilise winsdk (Windows Runtime) pour accéder aux métadonnées médias
-# sans dépendre de l'API Spotify Web (pas de token nécessaire).
+# Utilise winsdk pour accéder aux métadonnées médias
+# sans dépendre de l'API Spotify Web .
 # Fonctionne avec toute application multimédia Windows (Spotify, VLC, etc.)
-# =============================================================================
+
 
 import asyncio
 from typing import Optional

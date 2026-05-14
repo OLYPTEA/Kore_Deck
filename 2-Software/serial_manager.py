@@ -1,12 +1,11 @@
-# =============================================================================
-# serial_manager.py — Gestion robuste du port série ESP32 ↔ PC
+
+# serial_manager.py — Gestion robuste du port série ESP32 <=> PC
 #
-# Fonctionnalités :
+# Fonctionnalités : 
 #   - Connexion initiale avec retry
 #   - Reconnexion automatique si déconnexion détectée
 #   - Thread de lecture non-bloquant
 #   - Queue thread-safe pour les événements reçus
-# =============================================================================
 
 import serial
 import threading
@@ -41,9 +40,9 @@ class SerialManager:
             target=self._writer_loop, daemon=True, name="serial-writer"
         )
 
-    # =========================================================================
-    # Cycle de vie
-    # =========================================================================
+   
+    # Cycle de vie, note : start() doit être appelé après l'instanciation pour démarrer les threads
+    
 
     def start(self) -> None:
         """Démarre les threads de lecture et d'écriture."""
@@ -58,9 +57,9 @@ class SerialManager:
             self._serial.close()
         log.info("Port série fermé")
 
-    # =========================================================================
+    
     # Envoi
-    # =========================================================================
+   
 
     def send(self, line: str) -> None:
         """
@@ -73,9 +72,9 @@ class SerialManager:
     def is_connected(self) -> bool:
         return self._connected
 
-    # =========================================================================
-    # Thread reader — réception des trames ESP32 → PC
-    # =========================================================================
+    
+    # Thread reader — réception des trames ESP32 -> PC 
+    
 
     def _reader_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -101,9 +100,9 @@ class SerialManager:
                     except Exception:
                         pass
 
-    # =========================================================================
-    # Thread writer — envoi des trames PC → ESP32
-    # =========================================================================
+    
+    # Thread writer — envoi des trames PC -> ESP32 )
+    
 
     def _writer_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -122,9 +121,9 @@ class SerialManager:
                 log.warning(f"Erreur écriture série : {e}")
                 self._connected = False
 
-    # =========================================================================
+    
     # Connexion / reconnexion
-    # =========================================================================
+    
 
     def _try_connect(self) -> None:
         """Tentative de connexion — retente toutes les reconnect_delay secondes."""
@@ -142,3 +141,8 @@ class SerialManager:
             log.warning(f"Connexion échouée : {e} — retry dans "
                         f"{config.serial.reconnect_delay}s")
             time.sleep(config.serial.reconnect_delay)
+
+# Note pour le prochain dev : le fait que j'ai mis les threads dans le constructeur,
+# c'est juste pour éviter d'avoir à les recréer à chaque reconnexion. 
+# Ils tournent en boucle et gèrent eux même l'état de connexion. 
+# C'est plus simple que de devoir arrêter et redémarrer des threads à chaque reconnexion.
