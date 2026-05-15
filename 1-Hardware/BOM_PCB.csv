@@ -12,5 +12,5 @@
 "R5,R6","2","5.1KΩ","","","","Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal",""
 "R7,R8,R9,R10","4","1kΩ","","","","Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal",""
 "R11,R12","2","22Ω","","","","Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal",""
-"U1","1","ESP32 SPARKLE XH-S3E","","","","ESP32:Sans titre",""
+"U1","1","ESP32 SPARKLE XH-S3E","","","","ESP32:Sans titre","https://manuals.plus/m/be729405d0b0e6411fd7e01e69acec34184d17a9e57c43ec413389783c890f71"
 "U2","1","USBLC6-2SC6","","","","Package_TO_SOT_SMD:SOT-23-6","https://www.st.com/resource/en/datasheet/usblc6-2.pdf"
