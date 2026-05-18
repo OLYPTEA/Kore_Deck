@@ -161,7 +161,7 @@ The project uses filtering techniques to ensure the accuracy of analog readings:
 
 # Roadmap
 
-- [ ] Interface UI avancée/Advanced UI
+- [ ] Interface UI avancée/Advanced UI (Coming Soon)
 - [ ] Gestion multi-profils/Multi-profile management
 - [ ] Intégration MQTT/MQTT integration
 - [ ] Contrôle robotique avancé/Advanced robotics control
