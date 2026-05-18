@@ -11,14 +11,17 @@
 </p>
 
 <h3 align="center">
-Un Hub de Control Modulaire pour PC et Robotique/A Modular Stream Deck & Robotics Control Hub (cf : Roboti_Arm)
+Un Hub de Control Modulaire pour PC et Robotique/A Modular Stream Deck & Robotics Control Hub (cf : Robotic_Arm)
 </h3>
 
 ---
 
 ##  Video de présentation/Cinematic Demo
 
-https://github.com/user-attachments/assets/996bb6e2-c286-4f35-a489-94fb3f0be9cc
+
+https://github.com/user-attachments/assets/3f7520e6-ee07-4d92-a84f-97e8f2b0d568
+
+
 
 
 <p align="center">
@@ -162,7 +165,6 @@ The project uses filtering techniques to ensure the accuracy of analog readings:
 - [ ] Gestion multi-profils/Multi-profile management
 - [ ] Intégration MQTT/MQTT integration
 - [ ] Contrôle robotique avancé/Advanced robotics control
-- [ ] Monitoring système temps réel/Real-time system monitoring
 - [ ] Support Wi-Fi / Bluetooth/Wi-Fi / Bluetooth support
 - [ ] Intégration Home Assistant/Home Assistant integration
 
@@ -190,7 +192,7 @@ https://github.com/OLYPTEA
 
 ---
 
-Merci pour avoir pris le temps de regarder le projet
+Merci d'avoir pris le temps de regarder le projet
 
 Thank you for taking the time to look at the project
 
