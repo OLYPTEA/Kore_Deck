@@ -18,7 +18,10 @@ Un Hub de Control Modulaire pour PC et Robotique/A Modular Stream Deck & Robotic
 
 ##  Video de présentation/Cinematic Demo
 
-https://github.com/user-attachments/assets/996bb6e2-c286-4f35-a489-94fb3f0be9cc
+
+https://github.com/user-attachments/assets/3f7520e6-ee07-4d92-a84f-97e8f2b0d568
+
+
 
 
 <p align="center">
