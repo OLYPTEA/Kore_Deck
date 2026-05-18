@@ -165,7 +165,6 @@ The project uses filtering techniques to ensure the accuracy of analog readings:
 - [ ] Gestion multi-profils/Multi-profile management
 - [ ] Intégration MQTT/MQTT integration
 - [ ] Contrôle robotique avancé/Advanced robotics control
-- [ ] Monitoring système temps réel/Real-time system monitoring
 - [ ] Support Wi-Fi / Bluetooth/Wi-Fi / Bluetooth support
 - [ ] Intégration Home Assistant/Home Assistant integration
 
