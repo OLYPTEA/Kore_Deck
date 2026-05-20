@@ -1,5 +1,20 @@
 # =============================================================================
 # logger.py — Logging centralisé avec rotation de fichier
+#
+# Deux handlers configurés :
+#   1. Console (stdout) : format court, horodatage HH:MM:SS — pour le développement
+#   2. Fichier rotatif  : format long avec module — pour le diagnostic 
+#
+# Rotation : le fichier streamdeck.log est limité à 1 Mo.
+# Quand il est plein, il est renommé streamdeck.log.1 et un nouveau est créé.
+# Les 3 derniers fichiers sont conservés (3 Mo d'historique maximum).
+#
+# Utilisation dans les autres modules :
+#   from logger import log
+#   log.info("Message")     → [14:32:05] INFO     Message
+#   log.debug("Détail")     → [14:32:05] DEBUG    Détail  (visible uniquement en mode DEBUG)
+#   log.warning("Alerte")   → [14:32:05] WARNING  Alerte
+#   log.error("Erreur")     → [14:32:05] ERROR    Erreur
 # =============================================================================
 
 import logging
@@ -10,39 +25,42 @@ from pathlib import Path
 
 def setup_logger(name: str = "streamdeck", level: str = "INFO") -> logging.Logger:
     """
-    Configure et retourne le logger principal.
-
-    Format console : [HH:MM:SS] LEVEL   message
-    Format fichier : timestamp | level | module | message
-    Rotation       : 1 Mo max, 3 fichiers conservés
+    Configure le logger et retourne l'instance.
+    Idempotent : si appelé deux fois, retourne le même logger sans recréer les handlers
+    (sinon chaque message s'affiche en double).
     """
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
 
     if logger.handlers:
-        return logger  # Déjà configuré
+        return logger   # déjà configuré, rien à faire
 
-    # --- Formatter console (lisible)
+    # --- Formatter console : compact, lisible en temps réel
+    # %(levelname)-8s : niveau padé à 8 chars pour aligner les messages
     console_fmt = logging.Formatter(
         fmt="[%(asctime)s] %(levelname)-8s %(message)s",
         datefmt="%H:%M:%S"
     )
 
-    # --- Formatter fichier (détaillé)
+    # --- Formatter fichier : complet, avec module source pour le diagnostic
     file_fmt = logging.Formatter(
         fmt="%(asctime)s | %(levelname)-8s | %(module)-20s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
 
-    # --- Handler console
+    # --- Handler console (stdout pour compatibilité avec les redirections)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(console_fmt)
-    console_handler.setLevel(logging.DEBUG)
+    console_handler.setLevel(logging.DEBUG)   # Affiche tout ce que le logger laisse passer
 
     # --- Handler fichier rotatif
+    # Chemin : même dossier que logger.py → streamdeck.log à côté des scripts
     log_path = Path(__file__).parent / "streamdeck.log"
     file_handler = RotatingFileHandler(
-        log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+        log_path,
+        maxBytes=1_000_000,   # 1 Mo puis rotation
+        backupCount=3,        # garde les 3 derniers fichiers — 3 Mo d'historique max
+        encoding="utf-8"      # sinon les accents explosent sur certaines configs Windows
     )
     file_handler.setFormatter(file_fmt)
     file_handler.setLevel(logging.DEBUG)
@@ -53,5 +71,5 @@ def setup_logger(name: str = "streamdeck", level: str = "INFO") -> logging.Logge
     return logger
 
 
-# Logger global importable
+# dans chaque fichier du projet : "from logger import log" et c'est bon
 log = setup_logger()
