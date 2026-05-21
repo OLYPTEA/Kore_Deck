@@ -80,6 +80,13 @@ constexpr uint32_t PC_TIMEOUT_MS        = 3000;  ///< Délai avant détection d�
 constexpr uint16_t SERIAL_BUFFER_SIZE   = 512;
 
 // -----------------------------------------------------------------------------
+// SECTION 6 BIS — ÉCRAN DWIN (bornes pour buffers statiques)
+// -----------------------------------------------------------------------------
+constexpr uint8_t DWIN_MAX_STRING_CHARS = 32;  ///< Taille max d'une string écrite à un VP
+// Trame DGUS : 5A A5 LEN CMD VP_H VP_L + (DWIN_MAX_STRING_CHARS * 2 octets de payload)
+constexpr uint8_t DWIN_FRAME_MAX_SIZE   = 6 + (DWIN_MAX_STRING_CHARS * 2);
+
+// -----------------------------------------------------------------------------
 // SECTION 7 — WATCHDOG
 // -----------------------------------------------------------------------------
 constexpr uint32_t WDT_TIMEOUT_MS = 5000; ///< Reset si loop() bloque plus de 5s

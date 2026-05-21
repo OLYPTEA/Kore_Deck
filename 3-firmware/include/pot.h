@@ -14,6 +14,23 @@
 #include <Arduino.h>
 #include "config.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Garantie compile-time : POT_OVERSAMPLE_COUNT doit être une puissance de 2
+// pour que la division finale soit transformable en simple shift de bits.
+// ─────────────────────────────────────────────────────────────────────────────
+static_assert(POT_OVERSAMPLE_COUNT > 0
+              && (POT_OVERSAMPLE_COUNT & (POT_OVERSAMPLE_COUNT - 1)) == 0,
+              "POT_OVERSAMPLE_COUNT doit etre une puissance de 2 strictement positive");
+
+namespace _potDetail {
+    constexpr uint8_t log2_ct(uint8_t n) {
+        return (n <= 1) ? 0u : static_cast<uint8_t>(1u + log2_ct(static_cast<uint8_t>(n >> 1)));
+    }
+}
+
+/// @brief Décalage équivalent à la division par POT_OVERSAMPLE_COUNT
+constexpr uint8_t POT_OVERSAMPLE_SHIFT = _potDetail::log2_ct(POT_OVERSAMPLE_COUNT);
+
 class Potentiometer {
 public:
     // -------------------------------------------------------------------------
@@ -94,9 +111,11 @@ private:
     uint32_t _oversample() const {
         uint32_t sum = 0;
         for (uint8_t i = 0; i < POT_OVERSAMPLE_COUNT; ++i) {
-            sum += analogRead(_pin);
+            sum += static_cast<uint32_t>(analogRead(_pin));
         }
-        return sum / POT_OVERSAMPLE_COUNT;
+        // POT_OVERSAMPLE_COUNT est garanti puissance de 2 (static_assert)
+        // → division remplacée par un shift, déterministe et instantané
+        return sum >> POT_OVERSAMPLE_SHIFT;
     }
 
     // -------------------------------------------------------------------------

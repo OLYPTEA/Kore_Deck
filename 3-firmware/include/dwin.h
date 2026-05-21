@@ -48,26 +48,29 @@ public:
     /// @param maxChars Nombre maximum de caractères à écrire
     // -------------------------------------------------------------------------
     void writeString(uint16_t vp, const char* str, uint8_t maxChars) {
-        if (!str) return;
+        if (str == nullptr || maxChars == 0) return;
 
-        // Longueur en mots (2 octets/char)
-        uint8_t len    = strnlen(str, maxChars);
-        uint8_t words  = maxChars; // On écrit toujours la longueur max (padding 0)
-        uint8_t dataLen = words * 2;
+        // Borner maxChars pour éviter tout débordement du buffer statique
+        if (maxChars > DWIN_MAX_STRING_CHARS) {
+            maxChars = DWIN_MAX_STRING_CHARS;
+        }
 
-        // Construction de la trame
-        uint8_t frame[8 + dataLen];
+        const uint8_t len     = static_cast<uint8_t>(strnlen(str, maxChars));
+        const uint8_t dataLen = static_cast<uint8_t>(maxChars * 2);
+
+        // Buffer statique borné par la constante de config — pas de VLA
+        uint8_t frame[DWIN_FRAME_MAX_SIZE];
         uint8_t i = 0;
 
         frame[i++] = 0x5A;
         frame[i++] = 0xA5;
-        frame[i++] = 3 + dataLen;   // Longueur payload
-        frame[i++] = 0x82;          // Commande écriture
-        frame[i++] = (vp >> 8) & 0xFF;
-        frame[i++] = vp & 0xFF;
+        frame[i++] = static_cast<uint8_t>(3 + dataLen);   // Longueur payload
+        frame[i++] = 0x82;                                // Commande écriture
+        frame[i++] = static_cast<uint8_t>((vp >> 8) & 0xFF);
+        frame[i++] = static_cast<uint8_t>(vp & 0xFF);
 
-        // Encodage 2 octets/char (0x00 + ASCII)
-        for (uint8_t c = 0; c < words; ++c) {
+        // Encodage 2 octets/char (0x00 + ASCII), padding à 0 au-delà de len
+        for (uint8_t c = 0; c < maxChars; ++c) {
             frame[i++] = 0x00;
             frame[i++] = (c < len) ? static_cast<uint8_t>(str[c]) : 0x00;
         }

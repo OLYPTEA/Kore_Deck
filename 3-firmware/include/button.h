@@ -26,6 +26,19 @@ enum class ButtonEvent : uint8_t {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+/// @brief Mode de fonctionnement du bouton
+///
+/// FULL      : tous les événements supportés. Un PRESS est émis APRÈS expiration
+///             de la fenêtre BTN_DOUBLE_PRESS_MS → latence ~300ms sur appui simple.
+/// NO_DOUBLE : pas de détection double-appui. PRESS est émis dès le relâchement
+///             (latence ≈ debounce uniquement). LONG_PRESS reste supporté.
+// ─────────────────────────────────────────────────────────────────────────────
+enum class ButtonMode : uint8_t {
+    FULL      = 0,
+    NO_DOUBLE = 1
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 /// @brief États internes de la machine à état du bouton
 // ─────────────────────────────────────────────────────────────────────────────
 enum class ButtonState : uint8_t {
@@ -42,9 +55,10 @@ public:
     /// @param pin      GPIO connecté au bouton
     /// @param index    Indice 0-6 pour identification
     // -------------------------------------------------------------------------
-    explicit Button(uint8_t pin, uint8_t index)
+    explicit Button(uint8_t pin, uint8_t index, ButtonMode mode = ButtonMode::FULL)
         : _pin(pin)
         , _index(index)
+        , _mode(mode)
         , _state(ButtonState::IDLE)
         , _pressTime(0)
         , _releaseTime(0)
@@ -52,6 +66,11 @@ public:
         , _debounceTime(0)
         , _stableState(HIGH)
     {}
+
+    // -------------------------------------------------------------------------
+    /// @brief Change le mode dynamiquement (rare — surtout utile en debug)
+    // -------------------------------------------------------------------------
+    void setMode(ButtonMode mode) { _mode = mode; }
 
     // -------------------------------------------------------------------------
     void begin() {
@@ -99,8 +118,13 @@ public:
                     _state = ButtonState::LONG_TRIGGERED;
                     return ButtonEvent::LONG_PRESS;
                 }
-                // Relâchement avant le seuil long → possible simple ou double
+                // Relâchement avant le seuil long
                 if (newRelease) {
+                    if (_mode == ButtonMode::NO_DOUBLE) {
+                        // Pas de double-clic à attendre → PRESS instantané
+                        _state = ButtonState::IDLE;
+                        return ButtonEvent::PRESS;
+                    }
                     _releaseTime = now;
                     _state       = ButtonState::WAIT_DOUBLE;
                 }
@@ -135,6 +159,7 @@ public:
 private:
     uint8_t     _pin;
     uint8_t     _index;
+    ButtonMode  _mode;
     ButtonState _state;
     uint32_t    _pressTime;
     uint32_t    _releaseTime;

@@ -76,7 +76,7 @@ void setup() {
     Serial.begin(115200);
     delay(500); // Attente énumération USB
 
-    Serial.println(F("[StreamDeck] Boot v2.0"));
+    Serial.println(F("[KoreDeck] Boot v2.0"));
 
     // --- Watchdog hardware
     initWatchdog();
@@ -110,7 +110,7 @@ void setup() {
     // --- Signal de boot vers le PC
     Serial.println(F("READY"));
 
-    Serial.print(F("[StreamDeck] Catégorie restaurée : "));
+    Serial.print(F("[KoreDeck] Catégorie restaurée : "));
     Serial.println(static_cast<uint8_t>(currentCategory));
 }
 
@@ -152,7 +152,6 @@ static void handlePots() {
     for (uint8_t i = 0; i < POT_COUNT; ++i) {
         if (pots[i].update()) {
             anyChanged = true;
-            uint8_t catIdx = static_cast<uint8_t>(currentCategory);
             sendPotEvent(i, pots[i].getValue());
         }
         potValues[i] = pots[i].getValue();
@@ -175,11 +174,12 @@ static void handleButtons() {
         uint8_t catIdx = static_cast<uint8_t>(currentCategory);
 
         switch (evt) {
-            case ButtonEvent::PRESS:
+            case ButtonEvent::PRESS: {
                 sendAction(BTN_ACTIONS[catIdx][i]);
                 break;
+            }
 
-            case ButtonEvent::LONG_PRESS:
+            case ButtonEvent::LONG_PRESS: {
                 // Appui long sur bouton 1 → retour à l'accueil DWIN
                 if (i == 0) {
                     display.setPage(DWIN_PAGE_HOME);
@@ -192,14 +192,16 @@ static void handleButtons() {
                     sendAction(buf);
                 }
                 break;
+            }
 
-            case ButtonEvent::DOUBLE_PRESS:
+            case ButtonEvent::DOUBLE_PRESS: {
                 // Suffixe _DBL pour actions double-appui
                 char buf[48];
                 snprintf(buf, sizeof(buf), "%s_DBL",
                          BTN_ACTIONS[catIdx][i]);
                 sendAction(buf);
                 break;
+            }
 
             default:
                 break;
@@ -219,9 +221,17 @@ static void handleSerial() {
             serialBuf[serialBufIdx] = '\0';
 
             if (strncmp(serialBuf, "CAT:", 4) == 0) {
-                // Changement de catégorie demandé par le PC
-                uint8_t catIdx = static_cast<uint8_t>(atoi(serialBuf + 4));
-                if (catIdx < CATEGORY_COUNT) {
+                // Changement de catégorie demandé par le PC — parsing manuel digit-only
+                // (pas d'atoi → pas de comportement indéterminé en cas de corruption)
+                const char* valPtr = serialBuf + 4;
+                uint16_t    catIdx = 0;
+                bool        valid  = (*valPtr != '\0');
+                for (const char* q = valPtr; *q && *q != '\r' && *q != '\n'; ++q) {
+                    if (*q < '0' || *q > '9') { valid = false; break; }
+                    catIdx = static_cast<uint16_t>(catIdx * 10u + static_cast<uint16_t>(*q - '0'));
+                    if (catIdx >= CATEGORY_COUNT) { valid = false; break; }
+                }
+                if (valid && catIdx < CATEGORY_COUNT) {
                     enterCategory(static_cast<Category>(catIdx));
                 }
             } else {
@@ -230,7 +240,7 @@ static void handleSerial() {
                     lastPCReceiveTime = millis();
                     if (!pcConnected) {
                         pcConnected = true;
-                        Serial.println(F("[StreamDeck] PC connecté"));
+                        Serial.println(F("[KoreDeck] PC connecté"));
                     }
                 }
             }
@@ -310,7 +320,7 @@ static void enterCategory(Category cat) {
     nvs.saveCategory(cat);
     nvs.end();
 
-    Serial.print(F("[StreamDeck] Catégorie → "));
+    Serial.print(F("[KoreDeck] Catégorie → "));
     Serial.println(static_cast<uint8_t>(cat));
 }
 
@@ -344,7 +354,7 @@ static void checkPCConnection() {
     if ((millis() - lastPCReceiveTime) > PC_TIMEOUT_MS) {
         pcConnected = false;
         pcData.valid = false;
-        Serial.println(F("[StreamDeck] PC déconnecté (timeout)"));
+        Serial.println(F("[KoreDeck] PC déconnecté (timeout)"));
 
         // Affichage page d'accueil lors de la déconnexion
         display.setPage(DWIN_PAGE_HOME);
@@ -353,13 +363,23 @@ static void checkPCConnection() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // initWatchdog() — Configuration du watchdog hardware
+//
+// Deux APIs coexistent dans le SDK ESP32 :
+//   - arduino-esp32 v3.x / ESP-IDF 5.x : esp_task_wdt_init(esp_task_wdt_config_t*)
+//   - arduino-esp32 v2.x / ESP-IDF 4.x : esp_task_wdt_init(timeout_s, bool panic)
+// On détecte la version via ESP_IDF_VERSION (défini dans esp_idf_version.h)
 // ─────────────────────────────────────────────────────────────────────────────
 static void initWatchdog() {
-    esp_task_wdt_config_t wdtConfig = {
+#if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+    const esp_task_wdt_config_t wdtConfig = {
         .timeout_ms     = WDT_TIMEOUT_MS,
-        .idle_core_mask = (1 << 0),  // Core 0
-        .trigger_panic  = true        // Reset automatique si timeout
+        .idle_core_mask = (1u << 0),  // Core 0
+        .trigger_panic  = true         // Reset automatique si timeout
     };
     esp_task_wdt_reconfigure(&wdtConfig);
+#else
+    // API legacy : timeout en secondes, second arg = panic on timeout
+    esp_task_wdt_init(WDT_TIMEOUT_MS / 1000U, true);
+#endif
     esp_task_wdt_add(nullptr); // Enregistre la tâche courante (loop)
 }
