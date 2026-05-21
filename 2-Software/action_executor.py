@@ -8,23 +8,22 @@
 # _ACTION_MAP et _POT_MAP sont des attributs de classe (pas d'instance) :
 #   → alloués une seule fois au chargement du module, partagés par toutes les instances.
 #   → les valeurs sont des références de méthodes non-liées, appelées avec self explicite.
+#
+# Configuration pyautogui : faite dans __init__ (pas au niveau module) pour éviter
+# les effets de bord à l'import. Permet aussi aux tests d'instancier sans toucher
+# aux paramètres globaux de pyautogui.
 # =============================================================================
 
 import subprocess
+import threading
+import time
+
 import pyautogui
 import screen_brightness_control as sbc
-from typing import TYPE_CHECKING
 
 from logger import log
 from audio_manager import AudioManager
 from pomodoro import PomodoroTimer
-
-# par défaut pyautogui plante si la souris est dans un coin d'écran (mesure de sécurité).
-# on désactive ça parce que notre StreamDeck doit marcher quoi qu'il arrive.
-pyautogui.FAILSAFE = False
-
-# sans ça pyautogui attend 0.1 s entre chaque touche — on le voit vraiment
-pyautogui.PAUSE    = 0.0
 
 
 class ActionExecutor:
@@ -37,10 +36,34 @@ class ActionExecutor:
     Ajouter une nouvelle action = 1 méthode + 1 entrée dans le dict.
     """
 
+    # Guard pour la config globale pyautogui — appliquée une seule fois,
+    # même si plusieurs ActionExecutor sont instanciés
+    _pyautogui_configured = False
+
     def __init__(self, audio: AudioManager, pomodoro: PomodoroTimer) -> None:
         # Injection de dépendance : évite d'avoir des singletons globaux
         self._audio    = audio
         self._pomodoro = pomodoro
+
+        # État partagé exposé à l'agent (lecture seule depuis l'extérieur).
+        # Toggled par les actions _dnd_toggle / _obs_toggle.
+        self.dnd_toggled_at : float = 0.0
+        self.obs_toggled_at : float = 0.0
+
+        self._configure_pyautogui_once()
+
+    @classmethod
+    def _configure_pyautogui_once(cls) -> None:
+        """
+        Désactive FAILSAFE (sinon pyautogui plante si la souris est dans un coin)
+        et PAUSE (sinon 100 ms de délai entre chaque touche pressée).
+        Idempotent.
+        """
+        if cls._pyautogui_configured:
+            return
+        pyautogui.FAILSAFE = False
+        pyautogui.PAUSE    = 0.0
+        cls._pyautogui_configured = True
 
     # =========================================================================
     # Dispatch principal
@@ -49,16 +72,14 @@ class ActionExecutor:
     def execute_action(self, action: str) -> None:
         """
         Reçoit le nom d'une action et appelle le handler correspondant.
-        Les suffixes _LONG et _DBL (appui long / double) sont gérés par le firmware
-        et transmis tels quels ici — ils doivent figurer dans _ACTION_MAP si utilisés.
-
-        @param action  Ex: "MEDIA_PLAY", "MIC_TOGGLE_LONG", "SCREENSHOT_DBL"
+        Les suffixes _LONG et _DBL (appui long / double) doivent figurer
+        dans _ACTION_MAP si utilisés.
         """
         log.debug(f"Action : {action}")
         handler = self._ACTION_MAP.get(action)
         if handler:
             try:
-                handler(self)   # Appel de la méthode non-liée avec self
+                handler(self)
             except Exception as e:
                 log.error(f"Erreur action '{action}' : {e}")
         else:
@@ -66,11 +87,7 @@ class ActionExecutor:
 
     def execute_pot(self, pot_action: str, value: int) -> None:
         """
-        Reçoit le nom d'un potentiomètre et sa valeur brute (0-100, déjà normalisée
-        par le firmware depuis les 12 bits ADC).
-
-        @param pot_action  Ex: "VOL_MASTER", "BRIGHTNESS"
-        @param value       Entier 0-100 (firmware garantit cette plage)
+        Reçoit le nom d'un potentiomètre et sa valeur normalisée 0-100.
         """
         log.debug(f"Pot : {pot_action} = {value}")
         handler = self._POT_MAP.get(pot_action)
@@ -86,134 +103,122 @@ class ActionExecutor:
     # Actions HOME — multimédia + système
     # =========================================================================
 
-    def _media_play(self):
-        """Lecture/pause — utilise la touche média virtuelle (fonctionne sur tous les lecteurs)."""
+    def _media_play(self) -> None:
         pyautogui.press('playpause')
 
-    def _media_next(self):
-        """Piste suivante — touche média virtuelle."""
+    def _media_next(self) -> None:
         pyautogui.press('nexttrack')
 
-    def _media_prev(self):
-        """Piste précédente — touche média virtuelle."""
+    def _media_prev(self) -> None:
         pyautogui.press('prevtrack')
 
-    def _mic_toggle(self):
-        """Bascule le mute du microphone par défaut via pycaw."""
+    def _mic_toggle(self) -> None:
         self._audio.toggle_mic_mute()
 
-    def _screenshot(self):
-        """Capture d'écran Windows — ouvre l'outil de capture (Win+Shift+S)."""
+    def _screenshot(self) -> None:
         pyautogui.hotkey('win', 'shift', 's')
 
-    def _open_explorer(self):
-        """Ouvre l'explorateur de fichiers Windows."""
+    def _open_explorer(self) -> None:
         pyautogui.hotkey('win', 'e')
 
-    def _sleep_screens(self):
+    def _sleep_screens(self) -> None:
         """
         Éteint les écrans sans mettre le PC en veille.
-        On appelle user32.dll via PowerShell parce qu'il n'y a pas de lib Python propre pour ça.
-        WM_SYSCOMMAND + SC_MONITORPOWER + paramètre 2 = éteint les moniteurs.
-        Ouais c'est un peu hacky mais ça marche parfaitement.
+        On passe par PowerShell + DllImport user32 — pas de lib Python propre pour ça.
+        WM_SYSCOMMAND (0x0112) + SC_MONITORPOWER (0xF170) + lParam=2 = écrans OFF.
         """
-        subprocess.Popen(
-            ['powershell', '-Command',
-             '(Add-Type -MemberDefinition "[DllImport(\\"user32.dll\\")]'
-             'public static extern int SendMessage(int hWnd,int hMsg,int wParam,int lParam);"'
-             ' -Name U32 -PassThru)::SendMessage(-1,0x0112,0xF170,2)'],
-            shell=True
+        ps_code = (
+            '(Add-Type -MemberDefinition '
+            '"[DllImport(\\"user32.dll\\")] '
+            'public static extern int SendMessage(int hWnd,int hMsg,int wParam,int lParam);" '
+            '-Name U32 -PassThru)::SendMessage(-1,0x0112,0xF170,2)'
         )
+        # shell=False + liste d'args explicite — évite l'interprétation shell de la string
+        subprocess.Popen(['powershell.exe', '-NoProfile', '-Command', ps_code])
 
     # =========================================================================
     # Actions MAKING — Fusion 360 / création 3D
     # =========================================================================
 
-    def _undo(self):       pyautogui.hotkey('ctrl', 'z')
-    def _redo(self):       pyautogui.hotkey('ctrl', 'y')
-    def _save(self):       pyautogui.hotkey('ctrl', 's')
-    def _view_home(self):  pyautogui.press('h')          # Fusion 360 : remet la vue Home
+    def _undo(self) -> None:        pyautogui.hotkey('ctrl', 'z')
+    def _redo(self) -> None:        pyautogui.hotkey('ctrl', 'y')
+    def _save(self) -> None:        pyautogui.hotkey('ctrl', 's')
+    def _view_home(self) -> None:   pyautogui.press('h')
 
-    def _section_view(self):
-        """Vue en coupe Fusion 360 — toggle avec Shift+S."""
+    def _section_view(self) -> None:
         pyautogui.hotkey('shift', 's')
 
-    def _new_component(self):
-        """Nouveau composant Fusion 360."""
+    def _new_component(self) -> None:
         pyautogui.hotkey('ctrl', 'n')
 
-    def _export_stl(self):
-        """Exporte en STL via Ctrl+Shift+E (raccourci Fusion 360)."""
+    def _export_stl(self) -> None:
         pyautogui.hotkey('ctrl', 'shift', 'e')
 
     # =========================================================================
     # Actions FOCUS — productivité / bureau
     # =========================================================================
 
-    def _pomo_toggle(self):  self._pomodoro.toggle()
-    def _pomo_reset(self):   self._pomodoro.reset()
+    def _pomo_toggle(self) -> None:  self._pomodoro.toggle()
+    def _pomo_reset(self) -> None:   self._pomodoro.reset()
 
-    def _open_notion(self):
-        """Ouvre Notion via le protocole URI notion:// (nécessite l'app desktop installée)."""
+    def _open_notion(self) -> None:
+        """Ouvre Notion via le protocole URI notion:// (nécessite l'app desktop)."""
+        # 'start' est une commande shell builtin → shell=True nécessaire ici
         subprocess.Popen(['start', '', 'notion://'], shell=True)
 
-    def _dnd_toggle(self):
+    def _dnd_toggle(self) -> None:
         """
-        Active/désactive le mode Ne pas déranger.
-        Microsoft n'expose pas d'API propre pour ça en Python, donc on ouvre et referme
-        le centre de notifications en espérant que ça toggle le bon bouton.
-        TODO: remplacer par Focus Assist API quand quelqu'un l'aura wrappée correctement.
-        """
-        pyautogui.hotkey('win', 'a')   # ouvre le centre de notifs
-        import time; time.sleep(0.3)   # laisse le temps au panneau de s'afficher
-        pyautogui.hotkey('win', 'a')   # referme — le clic direct sur le toggle DND c'est trop fragile
+        Active/désactive le mode Ne pas déranger (Focus Assist).
+        Microsoft n'expose pas d'API stable pour ça en Python.
+        On marque l'horodatage pour que l'agent puisse re-lire la registry Focus Assist.
 
-    def _snap_left(self):       pyautogui.hotkey('win', 'left')
-    def _snap_right(self):      pyautogui.hotkey('win', 'right')
-    def _next_vdesktop(self):   pyautogui.hotkey('ctrl', 'win', 'right')   # Bureau virtuel suivant
+        Méthode hack : ouvrir+fermer le centre de notifs (Win+A).
+        TODO: utiliser Focus Assist API quand quelqu'un l'aura wrappée.
+        """
+        pyautogui.hotkey('win', 'a')
+        time.sleep(0.3)
+        pyautogui.hotkey('win', 'a')
+        self.dnd_toggled_at = time.monotonic()   # signal à l'agent de relire l'état
+
+    def _snap_left(self) -> None:     pyautogui.hotkey('win', 'left')
+    def _snap_right(self) -> None:    pyautogui.hotkey('win', 'right')
+    def _next_vdesktop(self) -> None: pyautogui.hotkey('ctrl', 'win', 'right')
 
     # =========================================================================
     # Actions GAME — streaming / gaming
     # =========================================================================
 
-    def _game_mic(self):
-        """Mute micro pendant une session de jeu (même handler que HOME)."""
+    def _game_mic(self) -> None:
         self._audio.toggle_mic_mute()
 
-    def _discord_mute(self):
-        """Raccourci Discord global pour mute/unmute micro (Ctrl+Shift+M)."""
+    def _discord_mute(self) -> None:
         pyautogui.hotkey('ctrl', 'shift', 'm')
 
-    def _game_screenshot(self):
-        """Capture Steam — F12 est le raccourci par défaut de l'overlay Steam."""
-        pyautogui.press('f12')
+    def _game_screenshot(self) -> None:
+        pyautogui.press('f12')   # Steam overlay
 
-    def _clip_30s(self):
-        """
-        Clip les 30 dernières secondes via Xbox Game Bar.
-        Win+Alt+G = 'Enregistrer les 30 dernières secondes'.
-        Nécessite que l'enregistrement en arrière-plan soit activé dans les paramètres Xbox.
-        """
+    def _clip_30s(self) -> None:
+        """Xbox Game Bar : enregistrer les 30 dernières secondes."""
         pyautogui.hotkey('win', 'alt', 'g')
 
-    def _obs_toggle(self):
-        """Lance/bascule OBS via le protocole URI obs:// (nécessite OBS installé)."""
+    def _obs_toggle(self) -> None:
+        """Lance OBS via le protocole URI obs:// (nécessite OBS installé)."""
         subprocess.Popen(['start', '', 'obs://'], shell=True)
+        self.obs_toggled_at = time.monotonic()
 
-    def _alt_tab(self):         pyautogui.hotkey('alt', 'tab')
-    def _task_manager(self):    pyautogui.hotkey('ctrl', 'shift', 'esc')
+    def _alt_tab(self) -> None:      pyautogui.hotkey('alt', 'tab')
+    def _task_manager(self) -> None: pyautogui.hotkey('ctrl', 'shift', 'esc')
 
     # =========================================================================
     # Handlers potentiomètres
     # =========================================================================
 
-    def _pot_vol_master(self, v: int):  self._audio.set_master_volume(v)
-    def _pot_vol_music(self, v: int):   self._audio.set_spotify_volume(v)
+    def _pot_vol_master(self, v: int) -> None:  self._audio.set_master_volume(v)
+    def _pot_vol_music(self, v: int) -> None:   self._audio.set_spotify_volume(v)
 
-    def _pot_brightness(self, v: int):
+    def _pot_brightness(self, v: int) -> None:
         """
-        Contrôle la luminosité du ou des moniteurs via screen_brightness_control.
-        Fonctionne avec les moniteurs DDC/CI et les écrans intégrés (laptops).
+        Contrôle la luminosité des moniteurs (DDC/CI + écrans intégrés).
         En cas d'échec (moniteur sans DDC), on log et on continue.
         """
         try:
@@ -221,46 +226,55 @@ class ActionExecutor:
         except Exception as e:
             log.warning(f"Luminosité : {e}")
 
-    def _pot_mic_gain(self, v: int):    self._audio.set_mic_gain(v)
+    def _pot_mic_gain(self, v: int) -> None: self._audio.set_mic_gain(v)
 
-    def _pot_zoom(self, v: int):
+    def _pot_zoom(self, v: int) -> None:
         """
         Zoom Fusion 360 via Ctrl+= / Ctrl+-.
-        Pas d'API directe donc on simule des pressions de touche.
         50 = neutre, en dessous = dézoom, au dessus = zoom.
-        Le sleep entre chaque pression c'est pour que Fusion 360 ait le temps de les traiter.
+
+        Lancé dans un thread daemon pour ne pas bloquer le reader série
+        pendant les sleep(0.05) successifs — sinon on rate des trames quand
+        l'utilisateur tourne le potard vite.
         """
-        import time
-        steps = int((v - 50) / 10)   # Calcul de l'écart normalisé
-        if steps > 0:
-            for _ in range(steps):
-                pyautogui.hotkey('ctrl', '=')
-                time.sleep(0.05)
-        elif steps < 0:
-            for _ in range(-steps):
-                pyautogui.hotkey('ctrl', '-')
+        steps = int((v - 50) / 10)
+        if steps == 0:
+            return
+
+        def _run_zoom_burst(n: int) -> None:
+            key = '=' if n > 0 else '-'
+            for _ in range(abs(n)):
+                pyautogui.hotkey('ctrl', key)
                 time.sleep(0.05)
 
-    def _pot_opacity(self, v: int):      pass   # TODO: à implémenter selon l'app CAO utilisée
-    def _pot_rotation(self, v: int):     pass   # TODO: pareil
-    def _pot_white_noise(self, v: int):  pass   # TODO: dépend de l'app bruit blanc choisie
+        threading.Thread(
+            target=_run_zoom_burst, args=(steps,),
+            daemon=True, name="pot-zoom-burst"
+        ).start()
 
-    def _pot_pomo_duration(self, v: int):
+    def _pot_opacity(self, v: int) -> None:
+        log.debug(f"OPACITY={v} (non implémenté — dépend de l'app CAO)")
+
+    def _pot_rotation(self, v: int) -> None:
+        log.debug(f"ROTATION={v} (non implémenté — dépend de l'app CAO)")
+
+    def _pot_white_noise(self, v: int) -> None:
+        log.debug(f"WHITE_NOISE={v} (non implémenté — dépend de l'app de bruit blanc)")
+
+    def _pot_pomo_duration(self, v: int) -> None:
         """
-        Ajuste la durée de travail Pomodoro en temps réel via le potentiomètre P4 (mode FOCUS).
-        Mapping linéaire : 0% → 5 min, 100% → 60 min.
+        Mapping linéaire 0-100 → 5-60 min pour la durée Pomodoro.
         """
-        minutes = 5 + int(v * 55 / 100)   # Plage 5-60 min
+        minutes = 5 + int(v * 55 / 100)
         self._pomodoro.set_duration(minutes)
 
-    def _pot_vol_game(self, v: int):     self._audio.set_game_volume(v)
-    def _pot_vol_discord(self, v: int):  self._audio.set_discord_volume(v)
+    def _pot_vol_game(self, v: int) -> None:    self._audio.set_game_volume(v)
+    def _pot_vol_discord(self, v: int) -> None: self._audio.set_discord_volume(v)
 
     # =========================================================================
     # Tables de dispatch — définies au niveau classe (une seule allocation)
     # =========================================================================
 
-    # Clé = chaîne reçue du firmware (après "ACTION:"), valeur = méthode non-liée
     _ACTION_MAP = {
         "MEDIA_PLAY"      : _media_play,
         "MEDIA_NEXT"      : _media_next,
@@ -295,7 +309,6 @@ class ActionExecutor:
         "TASK_MANAGER"    : _task_manager,
     }
 
-    # Clé = chaîne reçue du firmware (après "POT:"), valeur = méthode non-liée (v: int)
     _POT_MAP = {
         "VOL_MASTER"    : _pot_vol_master,
         "VOL_MUSIC"     : _pot_vol_music,
