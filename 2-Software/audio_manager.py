@@ -12,16 +12,15 @@
 #   comtypes.CoUninitialize()  à la fin
 # =============================================================================
 
-import comtypes
+import time
 from ctypes import POINTER, cast
-from typing import Optional
+from typing import Optional, Dict
 
 from pycaw.pycaw import (
     AudioUtilities,
     IAudioEndpointVolume,
     ISimpleAudioVolume,
 )
-from pycaw.constants import CLSID_MMDeviceEnumerator
 from comtypes import CLSCTX_ALL
 
 from logger import log
@@ -32,20 +31,22 @@ class AudioManager:
     """
     Gestionnaire audio Windows via pycaw (Python Core Audio Windows).
 
-    Initialise les interfaces COM au démarrage. Si un périphérique est absent
-    (ex: pas de micro), les méthodes correspondantes retournent silencieusement
-    sans lever d'exception (dégradation gracieuse).
+    Dégradation gracieuse : si un périphérique est absent, les méthodes
+    correspondantes retournent silencieusement sans lever d'exception.
+
+    Cache de sessions audio : éviter de ré-énumérer toutes les sessions Windows
+    à chaque mouvement de potentiomètre (peut être 30+ sessions, COM lent).
+    TTL configurable via config.audio.session_cache_ttl.
     """
 
     def __init__(self) -> None:
-        # None = interface COM non initialisée (périphérique absent ou erreur)
         self._master_volume : Optional[IAudioEndpointVolume] = None
         self._mic_volume    : Optional[IAudioEndpointVolume] = None
 
-        # Cache local du mute micro — évite un appel COM à chaque is_mic_muted()
-        self._mic_muted : bool = False
+        # Cache process_name (lowercase) → ISimpleAudioVolume + horodatage du lookup
+        self._session_cache : Dict[str, "ISimpleAudioVolume"] = {}
+        self._session_cache_time : float = 0.0
 
-        # Initialisation séparée sortie / entrée pour isoler les erreurs
         self._init_master()
         self._init_microphone()
 
@@ -54,32 +55,20 @@ class AudioManager:
     # =========================================================================
 
     def set_master_volume(self, percent: int) -> None:
-        """
-        Définit le volume master du périphérique de sortie par défaut.
-        Équivalent au slider Windows dans le mixeur.
-
-        @param percent  0-100 (clampé automatiquement)
-        """
+        """Définit le volume master (0-100)."""
         percent = max(0, min(100, percent))
         try:
             if self._master_volume:
-                # SetMasterVolumeLevelScalar attend un float 0.0-1.0
-                self._master_volume.SetMasterVolumeLevelScalar(
-                    percent / 100.0, None   # None = GUID event (non utilisé)
-                )
+                self._master_volume.SetMasterVolumeLevelScalar(percent / 100.0, None)
                 log.debug(f"Volume master → {percent}%")
         except Exception as e:
             log.error(f"set_master_volume({percent}) : {e}")
 
     def get_master_volume(self) -> int:
-        """
-        Lit le volume master actuel.
-        @return  Entier 0-100, ou 0 en cas d'erreur.
-        """
+        """Lit le volume master actuel (0-100), 0 en cas d'erreur."""
         try:
             if self._master_volume:
-                scalar = self._master_volume.GetMasterVolumeLevelScalar()
-                return int(scalar * 100)
+                return int(self._master_volume.GetMasterVolumeLevelScalar() * 100)
         except Exception as e:
             log.error(f"get_master_volume : {e}")
         return 0
@@ -92,49 +81,70 @@ class AudioManager:
         """
         Contrôle le volume d'une application dans le mixeur Windows.
 
-        Windows gère un "graph audio" par application : chaque processus qui
-        produit du son a une session audio indépendante. AudioUtilities.GetAllSessions()
-        énumère toutes ces sessions et filtre par nom de processus.
-
-        La comparaison est insensible à la casse pour gérer les variations
-        (Spotify.exe vs spotify.exe selon la version).
-
         @param process_name  Nom exact du .exe, ex: "Spotify.exe"
         @param percent       0-100
         @return True si l'application a été trouvée et modifiée
         """
         percent = max(0, min(100, percent))
         try:
-            sessions = AudioUtilities.GetAllSessions()
-            for session in sessions:
-                if session.Process and \
-                   session.Process.name().lower() == process_name.lower():
-                    # QueryInterface : récupère l'interface ISimpleAudioVolume depuis la session
-                    volume = session._ctl.QueryInterface(ISimpleAudioVolume)
-                    volume.SetMasterVolume(percent / 100.0, None)
-                    log.debug(f"Volume {process_name} → {percent}%")
-                    return True
+            volume_iface = self._get_app_volume_iface(process_name)
+            if volume_iface is None:
+                return False
+            volume_iface.SetMasterVolume(percent / 100.0, None)
+            log.debug(f"Volume {process_name} → {percent}%")
+            return True
         except Exception as e:
+            # Session invalidée (process fermé) → vide le cache pour ce process
+            self._session_cache.pop(process_name.lower(), None)
             log.error(f"set_app_volume({process_name}, {percent}) : {e}")
-        return False
+            return False
 
     def set_game_volume(self, percent: int) -> None:
-        """
-        Parcourt la liste de jeux connus et contrôle le premier qui tourne.
-        On peut pas savoir à l'avance quel jeu est ouvert donc on tâte dans l'ordre.
-        """
+        """Tâte la liste de jeux connus, contrôle le premier qui tourne."""
         for proc in config.audio.game_processes:
             if self.set_app_volume(proc, percent):
-                return   # trouvé, on s'arrête là
+                return
         log.debug("Aucun processus jeu actif trouvé")
 
     def set_spotify_volume(self, percent: int) -> None:
-        """Volume de Spotify (nom du processus dans config)."""
         self.set_app_volume(config.audio.spotify_process, percent)
 
     def set_discord_volume(self, percent: int) -> None:
-        """Volume de Discord (nom du processus dans config)."""
         self.set_app_volume(config.audio.discord_process, percent)
+
+    def _get_app_volume_iface(self, process_name: str):
+        """
+        Retourne l'ISimpleAudioVolume pour ce process, depuis le cache si possible.
+        Re-scanne toutes les sessions si le cache est trop vieux ou si le process
+        n'est pas connu (premier appel, ou app vient d'être lancée).
+        """
+        key = process_name.lower()
+        now = time.monotonic()
+        cache_expired = (now - self._session_cache_time) > config.audio.session_cache_ttl
+
+        if not cache_expired and key in self._session_cache:
+            return self._session_cache[key]
+
+        # Rebuild complet du cache : un seul GetAllSessions pour tous les process
+        self._rebuild_session_cache()
+        return self._session_cache.get(key)
+
+    def _rebuild_session_cache(self) -> None:
+        """Énumère toutes les sessions audio et reconstruit le cache."""
+        try:
+            self._session_cache.clear()
+            for session in AudioUtilities.GetAllSessions():
+                if not session.Process:
+                    continue
+                try:
+                    proc_name = session.Process.name().lower()
+                except Exception:
+                    continue   # Process mort entre l'énumération et le query
+                iface = session._ctl.QueryInterface(ISimpleAudioVolume)
+                self._session_cache[proc_name] = iface
+            self._session_cache_time = time.monotonic()
+        except Exception as e:
+            log.error(f"Rebuild session cache : {e}")
 
     # =========================================================================
     # Microphone (entrée audio par défaut)
@@ -143,46 +153,37 @@ class AudioManager:
     def toggle_mic_mute(self) -> bool:
         """
         Bascule le mute du microphone par défaut.
-        Utilise l'interface IAudioEndpointVolume sur le périphérique d'entrée.
+        Lit l'état RÉEL Windows avant de toggle → reste synchronisé même si
+        une autre app (Teams, Discord) a changé le mute via raccourci global.
 
         @return  Nouvel état mute (True = muté)
         """
         try:
             if self._mic_volume:
-                self._mic_muted = not self._mic_muted
-                # SetMute attend un int (0 ou 1), pas un bool Python
-                self._mic_volume.SetMute(int(self._mic_muted), None)
-                log.info(f"Micro {'muté' if self._mic_muted else 'actif'}")
+                current = bool(self._mic_volume.GetMute())
+                new_state = not current
+                self._mic_volume.SetMute(int(new_state), None)
+                log.info(f"Micro {'muté' if new_state else 'actif'}")
+                return new_state
         except Exception as e:
             log.error(f"toggle_mic_mute : {e}")
-        return self._mic_muted
+        return False
 
     def is_mic_muted(self) -> bool:
-        """
-        Lit l'état mute réel depuis Windows (pas le cache local).
-        Retombe sur le cache si la lecture COM échoue.
-        """
+        """Lit l'état mute réel depuis Windows. False en cas d'erreur ou pas de micro."""
         try:
             if self._mic_volume:
                 return bool(self._mic_volume.GetMute())
         except Exception:
             pass
-        return self._mic_muted   # Fallback sur le cache interne
+        return False
 
     def set_mic_gain(self, percent: int) -> None:
-        """
-        Ajuste le niveau d'enregistrement du micro.
-        Utilise SetMasterVolumeLevelScalar sur le périphérique d'entrée
-        (même interface que le volume master, mais côté capture).
-
-        @param percent  0-100 → 0.0-1.0 scalar
-        """
+        """Ajuste le niveau d'enregistrement du micro (0-100)."""
         percent = max(0, min(100, percent))
         try:
             if self._mic_volume:
-                self._mic_volume.SetMasterVolumeLevelScalar(
-                    percent / 100.0, None
-                )
+                self._mic_volume.SetMasterVolumeLevelScalar(percent / 100.0, None)
                 log.debug(f"Gain micro → {percent}%")
         except Exception as e:
             log.error(f"set_mic_gain({percent}) : {e}")
@@ -192,36 +193,22 @@ class AudioManager:
     # =========================================================================
 
     def _init_master(self) -> None:
-        """
-        Récupère le périphérique de sortie par défaut et son interface de volume.
-        GetSpeakers() → IMMDevice, .Activate() → interface COM, cast() → objet Python utilisable.
-        """
+        """Récupère IAudioEndpointVolume du périphérique de sortie par défaut."""
         try:
             devices   = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(
-                IAudioEndpointVolume._iid_, CLSCTX_ALL, None
-            )
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
             self._master_volume = cast(interface, POINTER(IAudioEndpointVolume))
             log.info("Volume master initialisé")
         except Exception as e:
             log.error(f"Initialisation volume master : {e}")
 
     def _init_microphone(self) -> None:
-        """
-        Initialise IAudioEndpointVolume pour le microphone par défaut.
-        Lit l'état mute initial pour synchroniser le cache _mic_muted.
-        Si aucun microphone n'est détecté, _mic_volume reste None
-        et toutes les méthodes micro échouent silencieusement.
-        """
+        """Récupère IAudioEndpointVolume du microphone par défaut."""
         try:
             mic = AudioUtilities.GetMicrophone()
             if mic:
-                interface = mic.Activate(
-                    IAudioEndpointVolume._iid_, CLSCTX_ALL, None
-                )
+                interface = mic.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
                 self._mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
-                # Synchronise le cache avec l'état réel au démarrage
-                self._mic_muted  = bool(self._mic_volume.GetMute())
                 log.info("Microphone initialisé")
         except Exception as e:
             log.error(f"Initialisation microphone : {e}")
