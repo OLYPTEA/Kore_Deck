@@ -10,23 +10,37 @@
 # pour changer un paramètre depuis argparse ou l'UI :
 #   config.serial.port = "COM7"   # ça s'applique immédiatement
 #
-# si un jour on veut charger ça depuis un fichier JSON externe,
-# il suffit de remplacer AppConfig() par un loader en bas du fichier.
+# chaque sous-config valide ses propres bornes dans __post_init__.
+# si un jour on veut charger depuis JSON externe, il suffira de remplacer
+# AppConfig() par un loader en bas du fichier.
 # =============================================================================
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List
+
+
+def _clamp(value, lo, hi, name: str):
+    """Lève ValueError si value sort de [lo, hi]."""
+    if value < lo or value > hi:
+        raise ValueError(f"{name}={value} hors plage [{lo}, {hi}]")
+    return value
 
 
 @dataclass
 class SerialConfig:
     """Paramètres de la liaison UART vers l'ESP32."""
 
-    port            : str   = "COM3"    # Port COM à adapter selon le Gestionnaire de périphériques
-                                        # Vérifier : Device Manager → Ports (COM & LPT)
-    baud            : int   = 115200    # Doit correspondre exactement au Serial.begin() firmware
-    timeout         : float = 1.0       # Timeout readline() en secondes (évite le blocage infini)
-    reconnect_delay : float = 3.0       # Délai entre deux tentatives de reconnexion (secondes)
+    port            : str   = "COM3"
+    baud            : int   = 115200
+    timeout         : float = 1.0
+    reconnect_delay : float = 3.0
+
+    def __post_init__(self) -> None:
+        if not self.port:
+            raise ValueError("serial.port ne peut pas être vide")
+        _clamp(self.baud, 9600, 921600, "serial.baud")
+        _clamp(self.timeout, 0.05, 60.0, "serial.timeout")
+        _clamp(self.reconnect_delay, 0.5, 60.0, "serial.reconnect_delay")
 
 
 @dataclass
@@ -36,9 +50,20 @@ class TimingConfig:
     Augmenter ces valeurs réduit la charge CPU de l'agent.
     """
 
-    send_interval    : float = 0.1   # Fréquence d'envoi trame système → ESP32 (100 ms = 10 Hz)
-    spotify_interval : float = 2.0   # Rafraîchissement titre Spotify (API WinRT assez lente)
-    fps_interval     : float = 1.0   # Rafraîchissement FPS HWiNFO (shared memory)
+    send_interval    : float = 0.1    # Fréquence d'envoi trame système → ESP32 (10 Hz)
+    spotify_interval : float = 2.0    # Rafraîchissement titre Spotify (API WinRT lente)
+    fps_interval     : float = 1.0    # Rafraîchissement FPS HWiNFO (shared memory)
+    ui_push_interval : float = 0.2    # Push stats vers Tauri (5 Hz, suffisant pour de l'UI)
+    pomodoro_tick    : float = 0.25   # Vérification expiration Pomodoro (résolution seconde)
+    main_loop_sleep  : float = 0.005  # Repos boucle principale — évite 100% CPU
+
+    def __post_init__(self) -> None:
+        _clamp(self.send_interval,    0.01, 5.0,  "timing.send_interval")
+        _clamp(self.spotify_interval, 0.5,  60.0, "timing.spotify_interval")
+        _clamp(self.fps_interval,     0.1,  60.0, "timing.fps_interval")
+        _clamp(self.ui_push_interval, 0.05, 5.0,  "timing.ui_push_interval")
+        _clamp(self.pomodoro_tick,    0.05, 1.0,  "timing.pomodoro_tick")
+        _clamp(self.main_loop_sleep,  0.001, 0.1, "timing.main_loop_sleep")
 
 
 @dataclass
@@ -52,15 +77,21 @@ class AudioConfig:
                      Ajouter ici tout nouveau jeu à supporter.
     """
 
-    spotify_process : str  = "Spotify.exe"
-    discord_process : str  = "Discord.exe"
-    game_processes  : list = field(default_factory=lambda: [
+    spotify_process : str       = "Spotify.exe"
+    discord_process : str       = "Discord.exe"
+    game_processes  : List[str] = field(default_factory=lambda: [
         "EscapeFromTarkov.exe",
         "RainbowSix.exe",
         "valorant.exe",
         "cs2.exe",
         "VALORANT-Win64-Shipping.exe",
     ])
+    # Cache TTL pour les sessions audio (en secondes) — évite d'énumérer
+    # toutes les sessions Windows à chaque mouvement de potentiomètre
+    session_cache_ttl : float = 2.0
+
+    def __post_init__(self) -> None:
+        _clamp(self.session_cache_ttl, 0.1, 30.0, "audio.session_cache_ttl")
 
 
 @dataclass
@@ -70,10 +101,35 @@ class PomodorConfig:
     Modifiables via l'UI Settings ou via le potentiomètre POMO_DURATION (durée seulement).
     """
 
-    default_duration_min  : int = 25   # Durée d'une session de travail (minutes)
-    short_break_min       : int = 5    # Pause courte après chaque session
-    long_break_min        : int = 15   # Pause longue après sessions_before_long sessions
-    sessions_before_long  : int = 4    # Nombre de sessions avant pause longue
+    default_duration_min  : int = 25
+    short_break_min       : int = 5
+    long_break_min        : int = 15
+    sessions_before_long  : int = 4
+
+    def __post_init__(self) -> None:
+        _clamp(self.default_duration_min, 1, 240, "pomodoro.default_duration_min")
+        _clamp(self.short_break_min,      1, 60,  "pomodoro.short_break_min")
+        _clamp(self.long_break_min,       1, 120, "pomodoro.long_break_min")
+        _clamp(self.sessions_before_long, 1, 20,  "pomodoro.sessions_before_long")
+
+
+@dataclass
+class WebSocketConfig:
+    """Paramètres du serveur WebSocket exposé à l'interface Tauri."""
+
+    host             : str   = "localhost"   # NE PAS exposer sur le réseau (pas d'auth)
+    port             : int   = 8765
+    ping_interval    : float = 20.0
+    ping_timeout     : float = 10.0
+    max_message_size : int   = 16 * 1024     # 16 Ko — largement assez pour nos messages JSON
+
+    def __post_init__(self) -> None:
+        if not self.host:
+            raise ValueError("ws.host ne peut pas être vide")
+        _clamp(self.port,             1024, 65535,    "ws.port")
+        _clamp(self.ping_interval,    1.0,  300.0,    "ws.ping_interval")
+        _clamp(self.ping_timeout,     1.0,  300.0,    "ws.ping_timeout")
+        _clamp(self.max_message_size, 256,  1048576,  "ws.max_message_size")
 
 
 @dataclass
@@ -84,14 +140,20 @@ class AppConfig:
     c'est le piège classique des dataclasses Python avec des valeurs mutables par défaut.
     """
 
-    serial   : SerialConfig  = field(default_factory=SerialConfig)
-    timing   : TimingConfig  = field(default_factory=TimingConfig)
-    audio    : AudioConfig   = field(default_factory=AudioConfig)
-    pomodoro : PomodorConfig = field(default_factory=PomodorConfig)
+    serial   : SerialConfig    = field(default_factory=SerialConfig)
+    timing   : TimingConfig    = field(default_factory=TimingConfig)
+    audio    : AudioConfig     = field(default_factory=AudioConfig)
+    pomodoro : PomodorConfig   = field(default_factory=PomodorConfig)
+    ws       : WebSocketConfig = field(default_factory=WebSocketConfig)
 
     # Niveau de log : "DEBUG" pour le développement, "INFO" pour la production
     log_level : str = "INFO"
 
+    def __post_init__(self) -> None:
+        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        if self.log_level.upper() not in valid_levels:
+            raise ValueError(f"log_level={self.log_level!r} doit être l'un de {valid_levels}")
 
-# l'instance globale — tout le monde fait "from config import config"
+
+# Instance globale — tout le monde fait "from config import config"
 config = AppConfig()

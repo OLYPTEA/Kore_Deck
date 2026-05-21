@@ -1,5 +1,5 @@
 # =============================================================================
-# agent.py — le cerveau du truc
+# agent.py — Brain
 #
 # C'est ici que tout se connecte. Chaque fichier fait un truc précis,
 # ce fichier les fait tous tourner ensemble :
@@ -12,7 +12,12 @@
 #   - ActionExecutor : traduit les actions bouton en vrais raccourcis clavier
 # =============================================================================
 
-import argparse, json, signal, sys, time, threading
+import argparse
+import signal
+import sys
+import threading
+import time
+
 from config          import config
 from logger          import log, setup_logger
 from serial_manager  import SerialManager
@@ -22,6 +27,22 @@ from audio_manager   import AudioManager
 from pomodoro        import PomodoroTimer
 from action_executor import ActionExecutor
 from ws_bridge       import WebSocketBridge
+
+# Détection optionnelle de l'état Focus Assist (DND) sur Windows
+try:
+    import winreg  # stdlib Windows uniquement
+except ImportError:
+    winreg = None
+
+# Détection optionnelle de l'état OBS via énumération de process
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+
+# Noms des process OBS à détecter (tous variants)
+_OBS_PROCESS_NAMES = {"obs64.exe", "obs32.exe", "obs.exe"}
 
 
 class KoreDeckAgent:
@@ -50,12 +71,21 @@ class KoreDeckAgent:
 
         # État applicatif
         self._current_category : int  = 0      # 0=HOME 1=MAKING 2=FOCUS 3=GAME
-        self._dnd_active       : bool = False   # Do Not Disturb Windows
-        self._obs_active       : bool = False   # OBS en cours d'enregistrement
+        self._dnd_active       : bool = False   # Mis à jour par _refresh_dnd_state()
+        self._obs_active       : bool = False   # Mis à jour par _refresh_obs_state()
 
-        # timestamps pour pas spammer à chaque tick
-        self._last_send_time    = self._last_spotify_time = 0.0
-        self._last_fps_time     = self._last_ws_push_time = 0.0
+        # Timestamps des dernières exécutions périodiques
+        self._last_send_time     = 0.0
+        self._last_spotify_time  = 0.0
+        self._last_fps_time      = 0.0
+        self._last_ws_push_time  = 0.0
+        self._last_pomo_tick     = 0.0
+        self._last_dnd_check     = 0.0
+        self._last_obs_check     = 0.0
+        # Horodatage du dernier toggle DND/OBS observé côté executor
+        # → permet de re-lire l'état Windows juste après une action UI
+        self._last_dnd_toggle_seen = 0.0
+        self._last_obs_toggle_seen = 0.0
 
         # on cache ces valeurs car les relire à chaque tick c'est trop lent
         self._cached_track : str = "Aucune lecture"
@@ -72,7 +102,7 @@ class KoreDeckAgent:
         """Lance le bridge WS, les threads série, puis entre dans la boucle principale."""
         log.info("=" * 60)
         log.info("Kore Deck — Agent PC v2.0")
-        log.info(f"Port : {config.serial.port} | WS : ws://localhost:8765")
+        log.info(f"Port : {config.serial.port} | WS : ws://{config.ws.host}:{config.ws.port}")
         log.info("=" * 60)
 
         self._bridge.start()   # Lance le serveur WebSocket dans son thread
@@ -89,11 +119,14 @@ class KoreDeckAgent:
 
     def stop(self) -> None:
         """Arrêt propre : notifie l'UI, puis ferme les connexions dans l'ordre."""
+        if not self._running:
+            return   # Déjà arrêté — idempotent
         self._running = False
+        self._stop_event.set()
         self._bridge.send_agent_status("stopped")
         self._bridge.send_connection_status("disconnected")
-        self._serial.stop()    # Ferme le port série (join des threads)
-        self._bridge.stop()    # Ferme le serveur WebSocket
+        self._serial.stop()
+        self._bridge.stop()
         log.info("Agent arrêté")
 
     # =========================================================================
@@ -102,21 +135,16 @@ class KoreDeckAgent:
 
     def _main_loop(self) -> None:
         """
-        La boucle principale. Tourne à ~200 Hz (sleep 5 ms entre chaque tour).
-        Chaque tâche a son propre timer pour pas tout faire en même temps.
-
-        qui fait quoi et à quelle fréquence :
-          - pomodoro.update()   → chaque tick  (faut pas rater la fin d'une session)
-          - Spotify             → toutes les 2 s  (l'API WinRT est pas rapide)
-          - FPS via HWiNFO      → toutes les 1 s
-          - trame vers ESP32    → toutes les 100 ms
-          - stats vers l'UI     → toutes les 200 ms  (inutile d'aller plus vite)
+        Boucle principale orchestrant les tâches périodiques.
+        Toutes les fréquences sont dans config.timing — pas de magic numbers.
         """
         while self._running and not self._stop_event.is_set():
-            now = time.monotonic()   # Monotonic : immunisé aux changements d'heure système
+            now = time.monotonic()   # Immunisé aux changements d'heure système
 
-            # --- Tick Pomodoro (détecte les fins de session)
-            self._pomodoro.update()
+            # --- Tick Pomodoro (résolution seconde — pas besoin d'aller plus vite)
+            if now - self._last_pomo_tick >= config.timing.pomodoro_tick:
+                self._last_pomo_tick = now
+                self._pomodoro.update()
 
             # --- Rafraîchissement titre Spotify (opération lente → cache)
             if now - self._last_spotify_time >= config.timing.spotify_interval:
@@ -128,7 +156,21 @@ class KoreDeckAgent:
                 self._last_fps_time = now
                 self._cached_fps = self._system.get_fps()
 
-            # --- Envoi trame système vers l'ESP32 (toutes les 100 ms)
+            # --- État DND : relecture périodique + immédiate après toggle UI
+            if (now - self._last_dnd_check >= 5.0
+                    or self._executor.dnd_toggled_at > self._last_dnd_toggle_seen):
+                self._last_dnd_check = now
+                self._last_dnd_toggle_seen = self._executor.dnd_toggled_at
+                self._dnd_active = self._refresh_dnd_state()
+
+            # --- État OBS : pareil
+            if (now - self._last_obs_check >= 5.0
+                    or self._executor.obs_toggled_at > self._last_obs_toggle_seen):
+                self._last_obs_check = now
+                self._last_obs_toggle_seen = self._executor.obs_toggled_at
+                self._obs_active = self._refresh_obs_state()
+
+            # --- Envoi trame système vers l'ESP32
             if now - self._last_send_time >= config.timing.send_interval:
                 self._last_send_time = now
                 if self._serial.is_connected():
@@ -137,14 +179,54 @@ class KoreDeckAgent:
                 else:
                     self._bridge.send_connection_status("disconnected")
 
-            # --- Push stats vers l'interface Tauri (toutes les 200 ms)
-            if now - self._last_ws_push_time >= 0.2:
+            # --- Push stats vers l'interface Tauri
+            if now - self._last_ws_push_time >= config.timing.ui_push_interval:
                 self._last_ws_push_time = now
-                if self._bridge.get_client_count() > 0:   # Inutile de sérialiser si personne n'écoute
+                if self._bridge.get_client_count() > 0:
                     self._push_stats_to_ui()
 
-            # sans ce sleep Python bouffe 100% CPU pour rien
-            time.sleep(0.005)
+            # Sans ce sleep Python bouffe 100% CPU pour rien
+            time.sleep(config.timing.main_loop_sleep)
+
+    # =========================================================================
+    # Détection DND / OBS (Windows)
+    # =========================================================================
+
+    def _refresh_dnd_state(self) -> bool:
+        """
+        Lit l'état du mode Ne pas déranger / Focus Assist depuis la registry.
+
+        Windows 10/11 stocke ça dans :
+          HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings
+            NOC_GLOBAL_SETTING_TOAST_ENABLED : 0 = DND actif, 1 = notifs actives
+
+        En cas d'erreur ou si winreg est indisponible (Linux/macOS), retourne False.
+        """
+        if winreg is None:
+            return False
+        try:
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as k:
+                value, _ = winreg.QueryValueEx(k, "NOC_GLOBAL_SETTING_TOAST_ENABLED")
+                return value == 0
+        except (OSError, FileNotFoundError):
+            return False
+
+    def _refresh_obs_state(self) -> bool:
+        """
+        Détecte si OBS Studio tourne en scannant les process actifs.
+        N'indique pas si OBS enregistre — juste s'il est lancé.
+        """
+        if psutil is None:
+            return False
+        try:
+            for proc in psutil.process_iter(['name']):
+                name = (proc.info.get('name') or "").lower()
+                if name in _OBS_PROCESS_NAMES:
+                    return True
+        except Exception:
+            pass
+        return False
 
     # =========================================================================
     # Push données vers l'UI
@@ -160,12 +242,10 @@ class KoreDeckAgent:
         mins, secs = self._pomodoro.get_remaining()
         sess = self._pomodoro.get_session_count()
 
-        # Sépare "Artiste - Titre" si le séparateur " - " est présent
         track = self._cached_track
         artist = ""
         if " - " in track:
-            parts = track.split(" - ", 1)   # maxsplit=1 pour éviter les splits multiples
-            artist, track = parts[0], parts[1]
+            artist, track = track.split(" - ", 1)   # maxsplit=1
 
         self._bridge.send_stats({
             "cpu": cpu, "ram": ram, "fps": self._cached_fps,
@@ -187,9 +267,7 @@ class KoreDeckAgent:
         Construit et envoie la trame texte vers l'ESP32.
 
         Format : CPU:<n>|RAM:<n.n>|TRACK:<str>|FPS:<n>|MIC:<0|1>|DND:<0|1>|OBS:<0|1>|POMO:<mm>:<ss>:<session>
-        Exemple : CPU:45|RAM:61.2|TRACK:Daft Punk - Harder|FPS:120|MIC:0|DND:0|OBS:1|POMO:22:30:2
-
-        Le firmware parse cette trame dans protocol.cpp (FrameParser::parse).
+        Le firmware parse cette trame dans protocol.h (FrameParser::parse).
         """
         cpu  = self._system.get_cpu_usage()
         ram  = self._system.get_ram_usage()
@@ -220,16 +298,14 @@ class KoreDeckAgent:
           POT:<action>:<0-100>   → pot bougé,       ex: POT:VOL_MASTER:73
           CAT:<0-3>              → changement de catégorie
           READY                  → l'ESP32 a fini de booter
-          PING                   → il est encore vivant (on ignore, c'est juste un keepalive)
+          PING                   → keepalive (on ignore)
         """
         log.debug(f"← ESP32 : {line}")
 
         if line.startswith("ACTION:"):
-            # Extrait le nom de l'action (tout ce qui suit "ACTION:")
             self._executor.execute_action(line[7:])
 
         elif line.startswith("POT:"):
-            # Format attendu : POT:<action>:<valeur_entière_0-100>
             parts = line[4:].split(":")
             if len(parts) == 2:
                 try:
@@ -238,19 +314,17 @@ class KoreDeckAgent:
                     pass   # Valeur non entière → on ignore silencieusement
 
         elif line.startswith("CAT:"):
-            # L'ESP32 confirme le changement de catégorie (suite à enterCategory())
             try:
                 self._current_category = int(line[4:])
             except ValueError:
                 pass
 
         elif line == "READY":
-            # L'ESP32 vient de booter — signaler la connexion à l'UI immédiatement
             log.info("ESP32 prêt")
             self._bridge.send_connection_status("connected")
 
         elif line == "PING":
-            pass   # Heartbeat reçu — rien à faire, la présence du message suffit
+            pass   # Heartbeat reçu — rien à faire
 
     # =========================================================================
     # Callbacks depuis l'UI (WebSocket → agent)
@@ -261,7 +335,7 @@ class KoreDeckAgent:
         L'UI a changé un paramètre (port, baud, etc.).
         TODO: appliquer vraiment les changements sans redémarrer l'agent
         """
-        log.info(f"Hot-reload config depuis UI")
+        log.info(f"Hot-reload config depuis UI : {list(data.keys())}")
 
     def _on_ui_action(self, action: str) -> None:
         """
@@ -285,8 +359,10 @@ def main() -> None:
     args = parser.parse_args()
 
     # Surcharge de la config au runtime si argument fourni
-    if args.port:  config.serial.port = args.port
-    if args.debug: setup_logger(level="DEBUG")
+    if args.port:
+        config.serial.port = args.port
+    if args.debug:
+        setup_logger(level="DEBUG")
 
     agent = KoreDeckAgent()
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# ws_bridge.py — le lien entre l'UI Tauri et l'agent Python
+# ws_bridge.py — Pour l'app et l'agent
 #
 # le serveur WebSocket tourne dans son propre thread avec sa propre boucle asyncio.
 # quand l'agent veut envoyer quelque chose depuis le thread principal,
@@ -13,6 +13,9 @@
 # Format messages ← UI  : { "type": "config_update", "data": {...} }
 #                          { "type": "action",         "action": "MEDIA_PLAY" }
 #                          { "type": "hello",          "version": "2.0" }
+#
+# Limite : les messages entrants sont rejetés au-delà de config.ws.max_message_size.
+# Hôte/port/timeouts proviennent tous de config.ws — pas de magic numbers.
 # =============================================================================
 
 import asyncio
@@ -24,11 +27,10 @@ from typing import Set, Optional, Callable
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+from config import config
+
 # Logger spécifique à ce module (hérite de la config root via setup_logger)
 log = logging.getLogger("ws_bridge")
-
-WS_HOST = "localhost"   # Écoute uniquement en local — ne pas exposer sur le réseau
-WS_PORT = 8765
 
 
 class WebSocketBridge:
@@ -72,11 +74,11 @@ class WebSocketBridge:
             target=self._run_loop, daemon=True, name="ws-bridge"
         )
         self._thread.start()
-        log.info(f"WebSocket bridge démarré sur ws://{WS_HOST}:{WS_PORT}")
+        log.info(f"WebSocket bridge démarré sur ws://{config.ws.host}:{config.ws.port}")
 
     def stop(self) -> None:
         """
-        Arrête le serveur proprement en programmant la fermeture dans l'event loop.
+        Arrête le serveur en programmant la fermeture dans l'event loop.
         call_soon_threadsafe est la seule façon sûre d'interagir avec une boucle
         asyncio depuis un thread extérieur.
         """
@@ -89,28 +91,18 @@ class WebSocketBridge:
     # =========================================================================
 
     def send_stats(self, stats: dict) -> None:
-        """
-        Envoie les stats système (CPU, RAM, FPS, Pomodoro…) à tous les clients.
-        Peut être appelé depuis n'importe quel thread.
-        """
+        """Envoie les stats (CPU/RAM/FPS/Pomo) à tous les clients."""
         self._broadcast({"type": "stats", "payload": stats})
 
     def send_connection_status(self, status: str) -> None:
-        """
-        Envoie le statut de la connexion ESP32.
-        @param status  "connected" | "disconnected" | "reconnecting"
-        """
+        """status: connected | disconnected | reconnecting"""
         self._broadcast({"type": "connection", "payload": status})
 
     def send_agent_status(self, status: str) -> None:
-        """
-        Envoie le statut de l'agent Python.
-        @param status  "running" | "stopped"
-        """
+        """status: running | stopped"""
         self._broadcast({"type": "agent", "payload": status})
 
     def get_client_count(self) -> int:
-        """Retourne le nombre de clients WebSocket connectés."""
         return len(self._clients)
 
     # =========================================================================
@@ -119,26 +111,21 @@ class WebSocketBridge:
 
     def _broadcast(self, message: dict) -> None:
         """
-        Envoie un message JSON à tout le monde.
+        Envoie un message JSON à tous les clients connectés.
         run_coroutine_threadsafe() parce qu'on est dans le thread principal
-        et que websockets veut qu'on passe par sa boucle asyncio — on n'a pas le choix.
+        et que websockets veut qu'on passe par sa boucle asyncio.
         """
         if not self._clients or not self._loop:
-            return   # personne d'connecté ou loop pas encore prête
+            return
         raw = json.dumps(message)
-        asyncio.run_coroutine_threadsafe(
-            self._broadcast_async(raw), self._loop
-        )
+        asyncio.run_coroutine_threadsafe(self._broadcast_async(raw), self._loop)
 
     async def _broadcast_async(self, raw: str) -> None:
-        """
-        Envoie un message à tous les clients dans l'event loop asyncio.
-        Les clients déconnectés sont retirés de l'ensemble silencieusement.
-        """
+        """Diffuse à tous les clients. Retire silencieusement les déconnectés."""
         if not self._clients:
             return
         disconnected = set()
-        for client in self._clients.copy():   # copy() sinon on modifie le set pendant l'itération
+        for client in self._clients.copy():
             try:
                 await client.send(raw)
             except websockets.exceptions.ConnectionClosed:
@@ -147,8 +134,7 @@ class WebSocketBridge:
 
     async def _handler(self, websocket: WebSocketServerProtocol) -> None:
         """
-        Coroutine invoquée par websockets pour chaque nouvelle connexion client.
-        Enregistre le client, envoie le message de bienvenue, puis lit en boucle.
+        Coroutine invoquée par websockets pour chaque nouvelle connexion.
         Le bloc finally garantit le retrait du client même en cas d'erreur.
         """
         self._clients.add(websocket)
@@ -158,11 +144,14 @@ class WebSocketBridge:
         await websocket.send(json.dumps({"type": "agent", "payload": "running"}))
 
         try:
-            # Boucle de réception — s'arrête quand la connexion est fermée
             async for raw in websocket:
+                # Validation taille — coupe court aux messages absurdes
+                if len(raw) > config.ws.max_message_size:
+                    log.warning(f"Message UI trop gros ({len(raw)} octets) — rejeté")
+                    continue
                 await self._handle_message(raw)
         except websockets.exceptions.ConnectionClosed:
-            pass   # Fermeture normale (navigateur fermé, Tauri rechargé, etc.)
+            pass
         finally:
             self._clients.discard(websocket)
             log.info(f"UI déconnectée ({len(self._clients)} client(s))")
@@ -178,51 +167,58 @@ class WebSocketBridge:
         """
         try:
             msg = json.loads(raw)
-            msg_type = msg.get("type")
-
-            if msg_type == "hello":
-                # Premier message envoyé par l'UI après connexion — juste un log
-                log.info(f"UI connectée — version {msg.get('version', '?')}")
-
-            elif msg_type == "config_update":
-                # L'UI demande à changer la configuration (port, baud, etc.)
-                if self.on_config_update:
-                    self.on_config_update(msg.get("data", {}))
-
-            elif msg_type == "action":
-                # L'UI déclenche une action directe (ex: clic sur bouton MUTE)
-                action = msg.get("action", "")
-                if action and self.on_action:
-                    self.on_action(action)
-
-            else:
-                log.debug(f"Message UI inconnu : {msg_type}")
-
         except json.JSONDecodeError:
             log.warning(f"Message non-JSON reçu : {raw[:100]}")
+            return
+
+        if not isinstance(msg, dict):
+            log.warning(f"Message UI non-objet : {type(msg).__name__}")
+            return
+
+        msg_type = msg.get("type")
+
+        if msg_type == "hello":
+            log.info(f"UI connectée — version {msg.get('version', '?')}")
+
+        elif msg_type == "config_update":
+            if self.on_config_update:
+                data = msg.get("data", {})
+                if isinstance(data, dict):
+                    self.on_config_update(data)
+
+        elif msg_type == "action":
+            action = msg.get("action", "")
+            # Validation : action doit être une str courte (les noms sont < 32 chars)
+            if isinstance(action, str) and 0 < len(action) <= 64 and self.on_action:
+                self.on_action(action)
+            else:
+                log.warning(f"Action UI invalide : {action!r}")
+
+        else:
+            log.debug(f"Message UI inconnu : {msg_type}")
 
     def _run_loop(self) -> None:
         """
         Crée une boucle asyncio dans ce thread et démarre le serveur.
-        Python ne crée pas de boucle automatiquement dans les threads secondaires,
-        donc on en crée une manuellement.
+        Python ne crée pas de boucle automatiquement dans les threads secondaires.
 
-        `await asyncio.Future()` c'est le pattern pour "tourne indéfiniment sans rien faire".
-        C'est plus propre que while True + sleep.
-
-        ping_interval/timeout : pour détecter les clients qui ont disparu sans dire au revoir.
+        `await asyncio.Future()` = pattern "tourne indéfiniment sans rien faire"
+        — plus propre que while True + sleep.
         """
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
 
         async def _serve():
             async with websockets.serve(
-                self._handler, WS_HOST, WS_PORT,
-                ping_interval=20,    # Envoie un PING toutes les 20 s
-                ping_timeout=10,     # Déconnecte si pas de PONG après 10 s
+                self._handler,
+                config.ws.host,
+                config.ws.port,
+                ping_interval = config.ws.ping_interval,
+                ping_timeout  = config.ws.ping_timeout,
+                max_size      = config.ws.max_message_size,
             ) as server:
                 self._server = server
-                await asyncio.Future()   # Maintient le serveur actif indéfiniment
+                await asyncio.Future()
 
         try:
             self._loop.run_until_complete(_serve())
