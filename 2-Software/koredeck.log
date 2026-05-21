@@ -1,0 +1,2 @@
+2026-05-21 16:39:12 | ERROR    | audio_manager        | Initialisation volume master : 'AudioDevice' object has no attribute 'Activate'
+2026-05-21 16:39:12 | INFO     | audio_manager        | Microphone initialisé
