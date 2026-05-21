@@ -1,7 +1,6 @@
 # =============================================================================
 # pomodoro.py — Minuteur Pomodoro avec gestion des sessions
 #
-# Machine à états finis :
 # =============================================================================
 
 import time
@@ -76,7 +75,10 @@ class PomodoroTimer:
         """
         Modifie la durée d'une session de travail.
         Appelé par le potentiomètre P4 en mode FOCUS (mapping 0-100 → 5-60 min).
-        La modification prend effet à la prochaine session (pas la courante).
+
+        Effet immédiat : si une session WORK est en cours, le temps restant
+        est recalculé en live (peut passer à zéro si on réduit en dessous
+        du temps déjà écoulé → expiration immédiate).
 
         @param minutes  Plage 5-60 (clampée automatiquement)
         """
