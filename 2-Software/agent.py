@@ -157,14 +157,14 @@ class KoreDeckAgent:
                 self._cached_fps = self._system.get_fps()
 
             # --- État DND : relecture périodique + immédiate après toggle UI
-            if (now - self._last_dnd_check >= 5.0
+            if (now - self._last_dnd_check >= config.timing.dnd_check_interval
                     or self._executor.dnd_toggled_at > self._last_dnd_toggle_seen):
                 self._last_dnd_check = now
                 self._last_dnd_toggle_seen = self._executor.dnd_toggled_at
                 self._dnd_active = self._refresh_dnd_state()
 
-            # --- État OBS : pareil
-            if (now - self._last_obs_check >= 5.0
+            # --- État OBS : pareil (process_iter coûteux → intervalle plus long)
+            if (now - self._last_obs_check >= config.timing.obs_check_interval
                     or self._executor.obs_toggled_at > self._last_obs_toggle_seen):
                 self._last_obs_check = now
                 self._last_obs_toggle_seen = self._executor.obs_toggled_at

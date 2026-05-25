@@ -191,14 +191,32 @@ class AudioManager:
     # Initialisation COM (privé)
     # =========================================================================
 
+    @staticmethod
+    def _unwrap_device(dev):
+        """
+        Selon la version de pycaw, GetSpeakers() / GetMicrophone() peuvent
+        renvoyer soit un IMMDevice COM natif (qui expose .Activate), soit un
+        wrapper Python `AudioDevice` (qui encapsule le device sous ._dev).
+        Cette helper déwrappe le second cas pour rester portable entre versions.
+        """
+        if dev is None or hasattr(dev, 'Activate'):
+            return dev
+        # AudioDevice wrapper : le device COM brut est dans ._dev
+        inner = getattr(dev, '_dev', None)
+        if inner is not None and hasattr(inner, 'Activate'):
+            return inner
+        # Dernier recours : on renvoie tel quel, l'appelant lèvera proprement
+        return dev
+
     def _init_master(self) -> None:
         """
         Récupère le périphérique de sortie par défaut et son interface de volume.
-        GetSpeakers() → IMMDevice, .Activate() → interface COM, cast() → objet Python utilisable.
+        GetSpeakers() → IMMDevice (ou AudioDevice selon version pycaw),
+        .Activate() → interface COM, cast() → objet Python utilisable.
         """
         try:
-            devices   = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(
+            device    = self._unwrap_device(AudioUtilities.GetSpeakers())
+            interface = device.Activate(
                 IAudioEndpointVolume._iid_, CLSCTX_ALL, None
             )
             self._master_volume = cast(interface, POINTER(IAudioEndpointVolume))
@@ -214,7 +232,7 @@ class AudioManager:
         et toutes les méthodes micro échouent silencieusement.
         """
         try:
-            mic = AudioUtilities.GetMicrophone()
+            mic = self._unwrap_device(AudioUtilities.GetMicrophone())
             if mic:
                 interface = mic.Activate(
                     IAudioEndpointVolume._iid_, CLSCTX_ALL, None

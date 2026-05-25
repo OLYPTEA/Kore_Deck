@@ -12,6 +12,8 @@
 
 import ctypes
 import struct
+import time
+from collections import deque
 from contextlib import contextmanager
 from typing import Optional
 
@@ -22,6 +24,13 @@ from logger import log
 
 # Constantes Win32
 _FILE_MAP_READ = 0x0004
+
+# Fenêtre de lissage CPU/RAM :
+#   - 1 échantillon brut par seconde (suffisant, psutil renvoie déjà du %)
+#   - moyenne glissante sur 3 échantillons → valeur publiée stable, refresh "perçu" 3 s
+# Évite les sautillements visuels dus aux pics CPU instantanés capturés à 10 Hz.
+_CPU_SAMPLE_INTERVAL = 1.0
+_CPU_WINDOW_SIZE     = 3
 
 
 @contextmanager
@@ -52,30 +61,70 @@ class SystemMonitor:
         # None = pas encore testé, False = HWiNFO absent (évite les retries inutiles)
         self._hwinfo_available : Optional[bool] = None
 
+        # Offset (en octets) de la sonde FPS dans la SHM HWiNFO une fois localisée.
+        # Évite de re-scanner tous les capteurs à chaque appel — le layout HWiNFO
+        # est stable tant que HWiNFO ne redémarre pas.
+        self._fps_offset : Optional[int] = None
+
+        # --- Lissage CPU/RAM
+        # On garde N échantillons bruts dans une deque bornée. La moyenne est
+        # recalculée au max toutes les 1 s ; les consommateurs (boucle agent à
+        # 5-10 Hz) lisent toujours la même valeur cachée entre deux samples.
+        self._cpu_samples : deque  = deque(maxlen=_CPU_WINDOW_SIZE)
+        self._ram_samples : deque  = deque(maxlen=_CPU_WINDOW_SIZE)
+        self._cached_cpu  : int    = 0
+        self._cached_ram  : float  = 0.0
+        self._last_sample_t : float = 0.0
+
+    # -------------------------------------------------------------------------
+
+    def _maybe_sample(self) -> None:
+        """
+        Échantillonne CPU/RAM si la dernière mesure date d'au moins 1 s.
+        Recalcule la moyenne glissante seulement quand un nouvel échantillon
+        est ajouté → coût quasi nul pour les appels rapprochés.
+        """
+        now = time.monotonic()
+        if now - self._last_sample_t < _CPU_SAMPLE_INTERVAL:
+            return
+        self._last_sample_t = now
+
+        try:
+            self._cpu_samples.append(psutil.cpu_percent(interval=0.0))
+        except Exception as e:
+            log.warning(f"CPU usage read error: {e}")
+
+        try:
+            self._ram_samples.append(psutil.virtual_memory().percent)
+        except Exception as e:
+            log.warning(f"RAM usage read error: {e}")
+
+        # Moyennes recalculées une fois par sample, pas à chaque getter
+        if self._cpu_samples:
+            self._cached_cpu = int(sum(self._cpu_samples) / len(self._cpu_samples))
+        if self._ram_samples:
+            self._cached_ram = round(sum(self._ram_samples) / len(self._ram_samples), 1)
+
     # -------------------------------------------------------------------------
 
     def get_cpu_usage(self) -> int:
         """
-        Retourne le pourcentage d'utilisation CPU global.
-        interval=0.0 : lecture non-bloquante du dernier échantillon psutil.
+        Retourne le % CPU moyenné sur la fenêtre de lissage (3 s par défaut).
+        Appelable à haute fréquence sans coût : la valeur n'est mise à jour
+        qu'une fois par seconde au maximum.
         """
-        try:
-            return int(psutil.cpu_percent(interval=0.0))
-        except Exception as e:
-            log.warning(f"CPU usage read error: {e}")
-            return 0
+        self._maybe_sample()
+        return self._cached_cpu
 
     # -------------------------------------------------------------------------
 
     def get_ram_usage(self) -> float:
         """
-        Retourne le pourcentage d'utilisation RAM (0.0-100.0), 1 décimale.
+        Retourne le % RAM moyenné sur la fenêtre de lissage, 1 décimale.
+        Même cadence que get_cpu_usage() — sample partagé.
         """
-        try:
-            return round(psutil.virtual_memory().percent, 1)
-        except Exception as e:
-            log.warning(f"RAM usage read error: {e}")
-            return 0.0
+        self._maybe_sample()
+        return self._cached_ram
 
     # -------------------------------------------------------------------------
 
@@ -123,32 +172,41 @@ class SystemMonitor:
             HEADER_SIZE  = 40
             ELEMENT_SIZE = 128
 
-            # --- Lecture du header pour connaître le nombre d'éléments
+            # --- Fast path : offset déjà connu, on ne mappe que 128 octets
+            if self._fps_offset is not None:
+                map_size = self._fps_offset + ELEMENT_SIZE
+                with _map_view(handle, map_size) as view:
+                    elem = bytes(
+                        (ctypes.c_byte * ELEMENT_SIZE).from_address(view + self._fps_offset)
+                    )
+                # Sanity check : on vérifie que le label correspond toujours.
+                # Si HWiNFO a réordonné ses capteurs, on invalide et on re-scanne.
+                label = elem[8:8 + 64].split(b'\x00')[0].decode('utf-8', errors='ignore').lower()
+                if 'fps' in label or 'frame' in label:
+                    return int(struct.unpack_from("<f", elem, 88)[0])
+                self._fps_offset = None   # Layout invalidé → full scan ci-dessous
+
+            # --- Slow path : lecture du header pour le nombre d'éléments
             with _map_view(handle, HEADER_SIZE) as view:
-                header       = (ctypes.c_byte * HEADER_SIZE).from_address(view)
-                header_bytes = bytes(header)
+                header_bytes = bytes((ctypes.c_byte * HEADER_SIZE).from_address(view))
                 num_elements = struct.unpack_from("<I", header_bytes, 32)[0]
 
             if num_elements == 0:
                 return 0
 
-            # --- Lecture de tous les éléments pour trouver "FPS"
+            # --- Scan complet pour localiser FPS, puis on mémorise l'offset
             total_size = HEADER_SIZE + num_elements * ELEMENT_SIZE
             with _map_view(handle, total_size) as view:
-                data       = (ctypes.c_byte * total_size).from_address(view)
-                data_bytes = bytes(data)
+                data_bytes = bytes((ctypes.c_byte * total_size).from_address(view))
 
                 for i in range(num_elements):
-                    offset = HEADER_SIZE + i * ELEMENT_SIZE
-
-                    # Label : C-string null-terminée à offset+8, max 64 chars
+                    offset    = HEADER_SIZE + i * ELEMENT_SIZE
                     label_raw = data_bytes[offset + 8 : offset + 8 + 64]
-                    label     = label_raw.split(b'\x00')[0].decode('utf-8', errors='ignore')
+                    label     = label_raw.split(b'\x00')[0].decode('utf-8', errors='ignore').lower()
 
-                    if 'fps' in label.lower() or 'frame' in label.lower():
-                        # Valeur float little-endian à offset+88
-                        val = struct.unpack_from("<f", data_bytes, offset + 88)[0]
-                        return int(val)
+                    if 'fps' in label or 'frame' in label:
+                        self._fps_offset = offset   # Cache pour les appels suivants
+                        return int(struct.unpack_from("<f", data_bytes, offset + 88)[0])
 
             return 0
 

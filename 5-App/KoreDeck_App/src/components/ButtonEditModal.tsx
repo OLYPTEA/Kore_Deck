@@ -1,73 +1,214 @@
-import { useState, useEffect, useCallback } from "react";
-import { X, Keyboard } from "lucide-react";
-import { ButtonConfig, ActionType } from "@/types";
+// =============================================================================
+// ButtonEditModal.tsx — Modal glass d'édition d'un bouton (skin "Option A")
+// =============================================================================
+
+import {
+  useState, useEffect, useCallback, useRef, type CSSProperties,
+} from "react";
+import * as LucideIcons from "lucide-react";
+import { X, Keyboard, type LucideIcon } from "lucide-react";
+import type { ButtonConfig, ActionType } from "@/types";
 import { useStore } from "@/store";
 
-const ICON_OPTIONS = [
-  "Play","Pause","SkipForward","SkipBack","Volume2","VolumeX",
-  "MicOff","Mic","Camera","Video","Monitor","Moon","Sun",
-  "Home","FolderOpen","Save","Undo2","Redo2","Plus","Minus",
-  "Scissors","FileOutput","BookOpen","Clock","RotateCcw","Target",
-  "BellOff","Bell","PanelLeft","PanelRight","LayoutGrid","Layers",
-  "Radio","Gamepad2","List","Keyboard","Terminal","Code2",
-  "Zap","Star","Heart","Coffee","Music","Headphones",
+interface Props {
+  button:    ButtonConfig;
+  catColor:  string;
+  onClose:   () => void;
+}
+
+const ACTION_TYPES: { id: ActionType; label: string }[] = [
+  { id: "shortcut", label: "Raccourci" },
+  { id: "app",      label: "App"       },
+  { id: "script",   label: "Script"    },
+  { id: "macro",    label: "Macro"     },
+  { id: "system",   label: "Système"   },
 ];
 
-const ACTION_TYPES: { id: ActionType; label: string; desc: string }[] = [
-  { id: "shortcut", label: "Raccourci",   desc: "Ex: Ctrl+Z, Win+E"              },
-  { id: "app",      label: "Application", desc: "Chemin ou URI (notion://)"       },
-  { id: "script",   label: "Script",      desc: "Fichier .ps1, .bat, .sh"         },
-  { id: "macro",    label: "Macro texte", desc: "Texte à taper"                   },
-  { id: "system",   label: "Système",     desc: "Action interne Kore Deck"        },
-];
+const PLACEHOLDERS: Record<ActionType, string> = {
+  shortcut: "Ctrl+Shift+M  ·  Cliquer puis presser les touches",
+  app:      "C:\\\\Program Files\\\\App.exe   ou   notion://",
+  script:   "C:\\\\scripts\\\\backup.ps1",
+  macro:    "Texte à taper automatiquement",
+  system:   "MUTE_MIC, TOGGLE_DND, OBS_REC...",
+};
 
-const COLORS = ["#6366F1", "#22C55E", "#F59E0B", "#EF4444", "#8E8EA0"];
+const inputStyle: CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: "var(--r-sm)",
+  background: "var(--glass-fill-soft)",
+  border: "1px solid var(--glass-border)",
+  color: "var(--text-1)",
+  fontSize: 13,
+  fontFamily: "JetBrains Mono, ui-monospace, monospace",
+  outline: "none",
+  boxSizing: "border-box",
+};
 
-interface Props { button: ButtonConfig; onClose: () => void; }
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <label className="kd-mono">{label}</label>
+      {children}
+    </div>
+  );
+}
 
-export function ButtonEditModal({ button, onClose }: Props) {
-  const updateButton    = useStore((s) => s.updateButton);
-  const activeProfileId = useStore((s) => s.activeProfileId);
-  const activeCategoryId= useStore((s) => s.activeCategoryId);
+export function ButtonEditModal({ button, catColor, onClose }: Props) {
+  const updateButton     = useStore((s) => s.updateButton);
+  const activeProfileId  = useStore((s) => s.activeProfileId);
+  const activeCategoryId = useStore((s) => s.activeCategoryId);
 
   const [label,       setLabel]       = useState(button.label);
-  const [icon,        setIcon]        = useState(button.icon);
-  const [color,       setColor]       = useState(button.color);
-  const [actionType,  setActionType]  = useState<ActionType>(button.action.type);
-  const [actionValue, setActionValue] = useState(button.action.value);
+  const [type,        setType]        = useState<ActionType>(button.action.type);
+  const [value,       setValue]       = useState(button.action.value);
   const [longPress,   setLongPress]   = useState(button.action.longPress   ?? "");
   const [doublePress, setDoublePress] = useState(button.action.doublePress ?? "");
-  const [recording,   setRecording]   = useState<"simple"|"long"|"double"|null>(null);
+  const [recording,   setRecording]   = useState<"value"|"long"|"double"|null>(null);
+
+  // Fenêtre de capture 1s pour les raccourcis. On tracke un Set de touches
+  // actuellement pressées (keydown ajoute, keyup retire) et on construit la
+  // combo à chaque tick — ça permet plusieurs touches non-modifier simultanées
+  // (ex: Ctrl+Shift+Alt+M = 4 touches), pas juste modifiers + 1 main key.
+  const MAX_KEYS = 4;
+  const [liveCombo, setLiveCombo] = useState("");
+  const [captureProgress, setCaptureProgress] = useState(0); // 0 → 1 sur 1s
+  const bestComboRef = useRef("");
+  const heldKeysRef  = useRef<Set<string>>(new Set());
+  const timerRef     = useRef<number | null>(null);
+  const startRef     = useRef<number>(0);
+  const rafRef       = useRef<number | null>(null);
+
+  const HeaderIcon = (LucideIcons as unknown as Record<string, LucideIcon>)[button.icon]
+                     ?? LucideIcons.Square;
+
+  // Normalise un e.key en label affichable (et clé canonique pour le Set).
+  // Renvoie "" si la touche doit être ignorée (Escape pour annuler etc.).
+  const normalizeKey = (key: string): string => {
+    if (key === "Control") return "Ctrl";
+    if (key === "Meta")    return "Win";
+    if (key === "Alt")     return "Alt";
+    if (key === "Shift")   return "Shift";
+    if (key === " ")       return "Space";
+    if (key.length === 1)  return key.toUpperCase();
+    return key; // Touches nommées : ArrowLeft, F1, Enter, Tab…
+  };
+
+  // Construit la combo ordonnée (modifiers d'abord, puis touches principales).
+  // Capée à MAX_KEYS pour matcher les conventions Windows (max 4 touches).
+  const buildCombo = (): string => {
+    const held = heldKeysRef.current;
+    const MOD_ORDER = ["Ctrl", "Alt", "Shift", "Win"];
+    const modifiers = MOD_ORDER.filter((m) => held.has(m));
+    const mainKeys: string[] = [];
+    held.forEach((k) => { if (!MOD_ORDER.includes(k)) mainKeys.push(k); });
+    return [...modifiers, ...mainKeys].slice(0, MAX_KEYS).join("+");
+  };
+
+  // Reset complet quand on (re)démarre / arrête un recording
+  useEffect(() => {
+    if (recording) {
+      bestComboRef.current = "";
+      heldKeysRef.current.clear();
+      setLiveCombo("");
+      setCaptureProgress(0);
+      startRef.current = 0;
+    } else {
+      if (timerRef.current) { window.clearTimeout(timerRef.current); timerRef.current = null; }
+      if (rafRef.current)   { cancelAnimationFrame(rafRef.current);  rafRef.current   = null; }
+      heldKeysRef.current.clear();
+      setLiveCombo("");
+      setCaptureProgress(0);
+    }
+  }, [recording]);
+
+  const commitCombo = useCallback((target: "value"|"long"|"double", combo: string) => {
+    if (!combo) { setRecording(null); return; }
+    if (target === "value")  setValue(combo);
+    if (target === "long")   setLongPress(combo);
+    if (target === "double") setDoublePress(combo);
+    setRecording(null);
+  }, []);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === "Escape" && !recording) { onClose(); return; }
     if (!recording) return;
+    if (e.key === "Escape") {
+      setRecording(null);
+      return;
+    }
     e.preventDefault();
-    const parts: string[] = [];
-    if (e.ctrlKey)  parts.push("Ctrl");
-    if (e.altKey)   parts.push("Alt");
-    if (e.shiftKey) parts.push("Shift");
-    if (e.metaKey)  parts.push("Win");
-    const key = e.key;
-    if (!["Control","Alt","Shift","Meta"].includes(key))
-      parts.push(key === " " ? "Space" : key);
-    const combo = parts.join("+");
+
+    const k = normalizeKey(e.key);
+    if (!k) return;
+
+    // Sync les modifiers depuis l'état du clavier (au cas où des keyup auraient
+    // été ratés — fenêtre Tauri qui perd le focus, par ex.).
+    const held = heldKeysRef.current;
+    if (e.ctrlKey)  held.add("Ctrl");  else held.delete("Ctrl");
+    if (e.altKey)   held.add("Alt");   else held.delete("Alt");
+    if (e.shiftKey) held.add("Shift"); else held.delete("Shift");
+    if (e.metaKey)  held.add("Win");   else held.delete("Win");
+    held.add(k);
+
+    const combo = buildCombo();
     if (!combo) return;
-    if (recording === "simple") setActionValue(combo);
-    if (recording === "long")   setLongPress(combo);
-    if (recording === "double") setDoublePress(combo);
-    setRecording(null);
+
+    // Garde la combo la plus complète observée pendant la fenêtre.
+    const bestLen = bestComboRef.current.split("+").filter(Boolean).length;
+    const newLen  = combo.split("+").length;
+    if (newLen >= bestLen) {
+      bestComboRef.current = combo;
+      setLiveCombo(combo);
+    }
+
+    // Démarre la fenêtre 1s au premier keydown valide
+    if (timerRef.current === null) {
+      const target = recording;
+      startRef.current = performance.now();
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
+        commitCombo(target, bestComboRef.current);
+      }, 1000);
+      const tick = () => {
+        const p = Math.min(1, (performance.now() - startRef.current) / 1000);
+        setCaptureProgress(p);
+        if (p < 1 && timerRef.current !== null) {
+          rafRef.current = requestAnimationFrame(tick);
+        }
+      };
+      rafRef.current = requestAnimationFrame(tick);
+    }
+  }, [recording, onClose, commitCombo]);
+
+  const handleKeyUp = useCallback((e: KeyboardEvent) => {
+    if (!recording) return;
+    const k = normalizeKey(e.key);
+    if (k) heldKeysRef.current.delete(k);
+    // Sync modifiers (un keyup peut concerner Shift alors que Ctrl est toujours tenu)
+    const held = heldKeysRef.current;
+    if (!e.ctrlKey)  held.delete("Ctrl");
+    if (!e.altKey)   held.delete("Alt");
+    if (!e.shiftKey) held.delete("Shift");
+    if (!e.metaKey)  held.delete("Win");
+    // Ne pas mettre à jour liveCombo ici — on garde la "best" combo capturée
+    // pour que l'utilisateur voie ce qui sera enregistré.
   }, [recording]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
+    window.addEventListener("keyup",   handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup",   handleKeyUp);
+    };
+  }, [handleKeyDown, handleKeyUp]);
 
   const handleSave = () => {
     updateButton(activeProfileId, activeCategoryId, button.id, {
-      label, icon, color,
+      label,
       action: {
-        type: actionType, value: actionValue,
+        type, value,
         longPress:   longPress   || undefined,
         doublePress: doublePress || undefined,
       },
@@ -77,158 +218,159 @@ export function ButtonEditModal({ button, onClose }: Props) {
 
   return (
     <div
-      role="dialog" aria-modal="true" aria-label={`Édition du bouton ${button.id + 1}`}
+      role="dialog" aria-modal="true"
+      aria-label={`Édition du bouton ${button.id + 1}`}
+      onClick={onClose}
       style={{
         position: "fixed", inset: 0,
-        background: "rgba(0,0,0,0.70)",
-        backdropFilter: "blur(4px)",
+        // Scrim renforcé : 0.55 → 0.72 + blur 8 → 24px pour isoler le modal
+        // du grid de tuiles en arrière-plan (illisibilité signalée).
+        background: "rgba(0,0,0,0.72)",
+        backdropFilter: "blur(24px) saturate(140%)",
+        WebkitBackdropFilter: "blur(24px) saturate(140%)",
         display: "flex", alignItems: "center", justifyContent: "center",
-        zIndex: 100,
+        zIndex: 200,
+        animation: "kd-fade-in 200ms var(--ease)",
       }}
-      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div style={{
-        background: "#111113",
-        border: "1px solid rgba(255,255,255,0.10)",
-        borderRadius: 13,
-        boxShadow: "0 24px 64px rgba(0,0,0,0.60), inset 0 1px 0 rgba(255,255,255,0.07)",
-        width: 440, maxHeight: "85vh", overflowY: "auto",
-        padding: 22,
-      }}>
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <h2 style={{ fontSize: 15, fontWeight: 600, color: "#ECECEF", letterSpacing: "-0.01em" }}>
-            Modifier le bouton {button.id + 1}
-          </h2>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="glass glass-strong"
+        style={{
+          width: 480, maxWidth: "92vw", maxHeight: "92vh", overflowY: "auto",
+          borderRadius: "var(--r-xl)",
+          padding: 24,
+          display: "flex", flexDirection: "column", gap: 18,
+          animation: "kd-scale-in 240ms var(--spring)",
+        }}
+      >
+        {/* ─── Header : avatar glow + titre + close ─────────────────────────── */}
+        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 14, flexShrink: 0,
+            background: `linear-gradient(135deg, ${button.color}, ${button.color}88)`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: `0 6px 18px ${button.color}55, inset 0 1px 0 rgba(255,255,255,0.25)`,
+          }}>
+            <HeaderIcon size={24} color="#fff" strokeWidth={2.2} aria-hidden="true" />
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="kd-mono" style={{ color: catColor }}>
+              BTN · {String(button.id + 1).padStart(2, "0")}
+            </div>
+            <div style={{
+              fontSize: 20, fontWeight: 600,
+              letterSpacing: "-0.025em", marginTop: 2, color: "var(--text-1)",
+            }}>Configurer le bouton</div>
+          </div>
+
           <button
             onClick={onClose} aria-label="Fermer"
             style={{
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.10)",
-              color: "#8E8EA0", padding: "4px 5px",
-              borderRadius: 6, display: "flex", alignItems: "center",
-            }}
-            onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.10)";
-              (e.currentTarget as HTMLElement).style.color = "#ECECEF";
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)";
-              (e.currentTarget as HTMLElement).style.color = "#8E8EA0";
+              width: 32, height: 32, borderRadius: "50%",
+              background: "var(--glass-fill)",
+              border: "1px solid var(--glass-border)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", flexShrink: 0,
             }}
           >
-            <X size={15} />
+            <X size={14} color="var(--text-2)" aria-hidden="true" />
           </button>
         </div>
 
-        {/* Icon picker */}
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 10, color: "#4E4E60", fontWeight: 600, marginBottom: 8,
-            textTransform: "uppercase", letterSpacing: "0.09em" }}>
-            Icône
-          </div>
-          <div style={{
-            display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 5,
-            maxHeight: 118, overflowY: "auto",
-          }}>
-            {ICON_OPTIONS.map((name) => (
-              <button key={name} title={name} onClick={() => setIcon(name)} style={{
-                width: 34, height: 34,
-                border: `1px solid ${icon === name ? `${color}55` : "rgba(255,255,255,0.08)"}`,
-                borderRadius: 6,
-                background: icon === name ? `${color}14` : "transparent",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", fontSize: 12,
-                color: icon === name ? color : "#4E4E60",
-                transition: "all 0.10s",
-              }}>
-                {name.slice(0, 2)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Color */}
-        <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 10, color: "#4E4E60", fontWeight: 600,
-            textTransform: "uppercase", letterSpacing: "0.09em" }}>
-            Couleur
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {COLORS.map((c) => (
-              <button key={c} onClick={() => setColor(c)} aria-label={`Couleur ${c}`} style={{
-                width: 20, height: 20, borderRadius: "50%", background: c,
-                border: color === c ? "2px solid #fff" : "2px solid transparent",
-                cursor: "pointer", transition: "transform 0.10s",
-                transform: color === c ? "scale(1.2)" : "scale(1)",
-              }} />
-            ))}
-          </div>
-        </div>
-
-        {/* Label */}
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 10, color: "#4E4E60", fontWeight: 600, marginBottom: 6,
-            textTransform: "uppercase", letterSpacing: "0.09em" }}>
-            Nom affiché
-          </div>
-          <input type="text" value={label} maxLength={16}
+        {/* ─── Libellé ─────────────────────────────────────────────────────── */}
+        <Field label="Libellé">
+          <input
+            value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="Ex: Lecture/Pause"/>
+            maxLength={16}
+            placeholder="Ex: Lecture / Pause"
+            style={inputStyle}
+          />
+        </Field>
+
+        {/* ─── Type d'action — segmented 5 ─────────────────────────────────── */}
+        <Field label="Type d'action">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
+            {ACTION_TYPES.map((t) => {
+              const active = type === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setType(t.id)}
+                  style={{
+                    padding: "8px 6px",
+                    borderRadius: "var(--r-sm)",
+                    background: active ? "var(--accent)" : "var(--glass-fill-soft)",
+                    border: active ? "1px solid transparent" : "1px solid var(--glass-border-soft)",
+                    fontSize: 11, fontWeight: 500,
+                    color: active ? "#fff" : "var(--text-2)",
+                    transition: "all 180ms var(--ease)",
+                    cursor: "pointer",
+                    boxShadow: active
+                      ? "0 4px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.18)"
+                      : "none",
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+
+        {/* ─── Valeur (avec recording si type = shortcut) ──────────────────── */}
+        <Field label="Valeur">
+          <RecordableValue
+            value={value}
+            onChange={setValue}
+            isShortcut={type === "shortcut"}
+            recording={recording === "value"}
+            liveCombo={recording === "value" ? liveCombo : ""}
+            captureProgress={recording === "value" ? captureProgress : 0}
+            onStartRecord={() => setRecording("value")}
+            placeholder={PLACEHOLDERS[type]}
+          />
+        </Field>
+
+        {/* ─── Appui long / Double-press ──────────────────────────────────── */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="Appui long">
+            <RecordableValue
+              value={longPress}
+              onChange={setLongPress}
+              isShortcut={type === "shortcut"}
+              recording={recording === "long"}
+              liveCombo={recording === "long" ? liveCombo : ""}
+              captureProgress={recording === "long" ? captureProgress : 0}
+              onStartRecord={() => setRecording("long")}
+              placeholder="—"
+              compact
+            />
+          </Field>
+          <Field label="Double-press">
+            <RecordableValue
+              value={doublePress}
+              onChange={setDoublePress}
+              isShortcut={type === "shortcut"}
+              recording={recording === "double"}
+              liveCombo={recording === "double" ? liveCombo : ""}
+              captureProgress={recording === "double" ? captureProgress : 0}
+              onStartRecord={() => setRecording("double")}
+              placeholder="—"
+              compact
+            />
+          </Field>
         </div>
 
-        {/* Action type */}
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 10, color: "#4E4E60", fontWeight: 600, marginBottom: 8,
-            textTransform: "uppercase", letterSpacing: "0.09em" }}>
-            Type d'action
-          </div>
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-            {ACTION_TYPES.map(({ id, label: lbl }) => (
-              <button key={id} onClick={() => setActionType(id)} style={{
-                padding: "5px 10px",
-                border: `1px solid ${actionType === id ? "rgba(99,102,241,0.40)" : "rgba(255,255,255,0.09)"}`,
-                borderRadius: 6,
-                background: actionType === id ? "rgba(99,102,241,0.12)" : "transparent",
-                color: actionType === id ? "#818CF8" : "#8E8EA0",
-                fontSize: 11, transition: "all 0.10s",
-              }}>
-                {lbl}
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize: 10, color: "#4E4E60", marginTop: 5 }}>
-            {ACTION_TYPES.find((a) => a.id === actionType)?.desc}
-          </div>
-        </div>
-
-        <ShortcutField label="Appui simple" value={actionValue}
-          recording={recording === "simple"} onStartRecord={() => setRecording("simple")}
-          onChange={setActionValue} actionType={actionType}/>
-        <ShortcutField label="Appui long (optionnel)" value={longPress}
-          recording={recording === "long"} onStartRecord={() => setRecording("long")}
-          onChange={setLongPress} actionType={actionType}/>
-        <ShortcutField label="Double-appui (optionnel)" value={doublePress}
-          recording={recording === "double"} onStartRecord={() => setRecording("double")}
-          onChange={setDoublePress} actionType={actionType}/>
-
-        {/* Footer */}
-        <div style={{
-          display: "flex", gap: 8, justifyContent: "flex-end",
-          marginTop: 20, borderTop: "1px solid rgba(255,255,255,0.07)", paddingTop: 16,
-        }}>
-          <button onClick={onClose} style={{
-            background: "none",
-            border: "1px solid rgba(255,255,255,0.09)",
-            padding: "7px 14px", color: "#8E8EA0", fontSize: 12,
-          }}>
+        {/* ─── Actions ─────────────────────────────────────────────────────── */}
+        <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+          <button onClick={onClose} className="kd-cta kd-cta--secondary" style={{ flex: 1 }}>
             Annuler
           </button>
-          <button onClick={handleSave} style={{
-            background: "#6366F1", border: "none",
-            padding: "7px 16px", color: "#fff", fontSize: 12, fontWeight: 500,
-          }}>
-            Sauvegarder
+          <button onClick={handleSave} className="kd-cta kd-cta--primary" style={{ flex: 1 }}>
+            Enregistrer
           </button>
         </div>
       </div>
@@ -236,54 +378,101 @@ export function ButtonEditModal({ button, onClose }: Props) {
   );
 }
 
-function ShortcutField({ label, value, recording, onStartRecord, onChange, actionType }: {
-  label: string; value: string; recording: boolean;
-  onStartRecord: () => void; onChange: (v: string) => void; actionType: ActionType;
+// ─────────────────────────────────────────────────────────────────────────────
+// RecordableValue — input qui devient bouton "enregistrer" pour les raccourcis.
+// Pendant recording : affiche liveCombo (mise à jour à chaque keydown) + barre
+// de progression 0→100% sur 1s. À expiration, le parent commit la combo finale.
+// ─────────────────────────────────────────────────────────────────────────────
+function RecordableValue({
+  value, onChange, isShortcut, recording, liveCombo = "", captureProgress = 0,
+  onStartRecord, placeholder, compact = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  isShortcut: boolean;
+  recording: boolean;
+  liveCombo?: string;
+  captureProgress?: number; // 0 → 1
+  onStartRecord: () => void;
+  placeholder: string;
+  compact?: boolean;
 }) {
-  const isShortcut = actionType === "shortcut";
-  return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 10, color: "#4E4E60", fontWeight: 600, marginBottom: 6,
-        textTransform: "uppercase", letterSpacing: "0.09em" }}>
-        {label}
-      </div>
-      {isShortcut ? (
-        <button onClick={onStartRecord} style={{
-          width: "100%", textAlign: "left",
-          background: recording ? "rgba(99,102,241,0.10)" : "rgba(0,0,0,0.28)",
-          border: `1px solid ${recording ? "rgba(99,102,241,0.45)" : "rgba(255,255,255,0.10)"}`,
-          borderRadius: 6, padding: "8px 12px",
-          color: value ? "#ECECEF" : "#4E4E60",
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  if (isShortcut) {
+    return (
+      <button
+        onClick={onStartRecord}
+        style={{
+          ...inputStyle,
+          position: "relative", overflow: "hidden",
+          padding: compact ? "9px 12px" : "10px 12px",
+          textAlign: "left",
           display: "flex", alignItems: "center", gap: 8,
-          transition: "all 0.12s",
-        }}>
-          <Keyboard size={13} color={recording ? "#818CF8" : "#4E4E60"}/>
-          {recording ? (
-            <span style={{ color: "#818CF8", fontSize: 12 }}>
-              Appuyez sur les touches...
-            </span>
-          ) : value ? (
-            <span style={{
-              background: "rgba(255,255,255,0.08)", borderRadius: 4,
-              padding: "2px 8px", fontFamily: "monospace", fontSize: 12,
-              color: "#ECECEF",
-            }}>
-              {value}
-            </span>
-          ) : (
-            <span style={{ fontSize: 12 }}>Cliquer pour enregistrer</span>
-          )}
-        </button>
-      ) : (
-        <input type="text" value={value} onChange={(e) => onChange(e.target.value)}
-          placeholder={
-            actionType === "app"    ? "chemin/vers/app.exe ou notion://" :
-            actionType === "script" ? "chemin/vers/script.ps1" :
-            actionType === "macro"  ? "Texte à taper automatiquement" :
-            "ACTION_ID"
-          }
+          background: recording ? "var(--accent-soft)" : "var(--glass-fill-soft)",
+          border: `1px solid ${recording ? "var(--accent)" : "var(--glass-border)"}`,
+          cursor: "pointer",
+          transition: "background 160ms var(--ease), border-color 160ms var(--ease)",
+          color: value ? "var(--text-1)" : "var(--text-3)",
+        }}
+      >
+        <Keyboard
+          size={13}
+          color={recording ? "var(--accent)" : "var(--text-3)"}
+          aria-hidden="true"
         />
-      )}
-    </div>
+        {recording ? (
+          liveCombo ? (
+            // Combo capturée en live — chip qui se reconstruit à chaque touche
+            <span style={{
+              padding: "2px 8px", borderRadius: 5,
+              background: "var(--accent)",
+              fontFamily: "JetBrains Mono, ui-monospace, monospace",
+              fontSize: 12, color: "#fff", fontWeight: 500,
+              boxShadow: "0 2px 8px var(--accent-glow)",
+            }}>{liveCombo}</span>
+          ) : (
+            <span style={{ color: "var(--accent)", fontSize: 12 }}>
+              Pressez la combinaison… (1s)
+            </span>
+          )
+        ) : value ? (
+          <span style={{
+            padding: "2px 8px", borderRadius: 5,
+            background: "var(--glass-fill)",
+            border: "1px solid var(--glass-border-soft)",
+            fontFamily: "JetBrains Mono, ui-monospace, monospace",
+            fontSize: 12, color: "var(--text-1)",
+          }}>{value}</span>
+        ) : (
+          <span style={{ fontSize: 12 }}>{placeholder}</span>
+        )}
+
+        {/* Barre de progression — défile 0 → 100% pendant la fenêtre 1s.
+            Posée en bas absolu, occupe toute la largeur du chip. */}
+        {recording && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute", left: 0, bottom: 0, height: 2,
+              width: `${Math.round(captureProgress * 100)}%`,
+              background: "var(--accent)",
+              boxShadow: "0 0 6px var(--accent-glow)",
+              transition: "width 80ms linear",
+            }}
+          />
+        )}
+      </button>
+    );
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      style={{ ...inputStyle, padding: compact ? "9px 12px" : "10px 12px" }}
+    />
   );
 }

@@ -11,6 +11,7 @@
 # =============================================================================
 
 import subprocess
+import time
 import pyautogui
 import screen_brightness_control as sbc
 from typing import TYPE_CHECKING
@@ -41,6 +42,12 @@ class ActionExecutor:
         # Injection de dépendance : évite d'avoir des singletons globaux
         self._audio    = audio
         self._pomodoro = pomodoro
+
+        # Edge-triggers consommés par agent._main_loop : chaque toggle UI bump
+        # l'horodatage, l'agent compare avec sa dernière valeur vue et relit
+        # l'état Windows immédiatement au lieu d'attendre le poll de 5 s.
+        self.dnd_toggled_at: float = 0.0
+        self.obs_toggled_at: float = 0.0
 
     # =========================================================================
     # Dispatch principal
@@ -165,8 +172,9 @@ class ActionExecutor:
         TODO: remplacer par Focus Assist API quand quelqu'un l'aura wrappée correctement.
         """
         pyautogui.hotkey('win', 'a')   # ouvre le centre de notifs
-        import time; time.sleep(0.3)   # laisse le temps au panneau de s'afficher
+        time.sleep(0.3)                # laisse le temps au panneau de s'afficher
         pyautogui.hotkey('win', 'a')   # referme — le clic direct sur le toggle DND c'est trop fragile
+        self.dnd_toggled_at = time.monotonic()
 
     def _snap_left(self):       pyautogui.hotkey('win', 'left')
     def _snap_right(self):      pyautogui.hotkey('win', 'right')
@@ -199,6 +207,7 @@ class ActionExecutor:
     def _obs_toggle(self):
         """Lance/bascule OBS via le protocole URI obs:// (nécessite OBS installé)."""
         subprocess.Popen(['start', '', 'obs://'], shell=True)
+        self.obs_toggled_at = time.monotonic()
 
     def _alt_tab(self):         pyautogui.hotkey('alt', 'tab')
     def _task_manager(self):    pyautogui.hotkey('ctrl', 'shift', 'esc')

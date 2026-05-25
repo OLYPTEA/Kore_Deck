@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Logo Kore Deck — source 1024x1024.
+    Identique à src/components/KoreLogo.tsx : dégradé 135° var(--cat-3d) → var(--accent),
+    border-radius 28%, glyphe Cpu (lucide) blanc centré à 50% de la taille.
+
+    Régénération des icônes Tauri (PNG/ICO/ICNS) :
+      cd 5-App/KoreDeck_App
+      npx @tauri-apps/cli icon ./src-tauri/icons/source.svg
+    (Si Tauri CLI refuse le SVG : convertis ce fichier en PNG 1024x1024 via
+     https://cloudconvert.com/svg-to-png puis pointe vers source.png)
+  -->
+  <defs>
+    <linearGradient id="koreGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#30D158"/>
+      <stop offset="100%" stop-color="#0A84FF"/>
+    </linearGradient>
+    <linearGradient id="koreHighlight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"  stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="22%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Fond carré à coins arrondis (radius 28% = 287px) -->
+  <rect width="1024" height="1024" rx="287" ry="287" fill="url(#koreGradient)"/>
+  <!-- Highlight bord haut (reflet OS) -->
+  <rect width="1024" height="1024" rx="287" ry="287" fill="url(#koreHighlight)"/>
+
+  <!-- Glyphe Cpu (lucide-react), scale 21.33x → 16*21.33 = 341px central + 4*21.33 = 85px de marge interne -->
+  <!-- Translate (1024-512)/2 = 256, scale 512/24 = 21.333 -->
+  <g transform="translate(256, 256) scale(21.333)"
+     fill="none" stroke="#FFFFFF" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round">
+    <rect x="4" y="4" width="16" height="16" rx="2"/>
+    <rect x="9" y="9" width="6" height="6"/>
+    <path d="M15 2v2"/>
+    <path d="M15 20v2"/>
+    <path d="M2 15h2"/>
+    <path d="M2 9h2"/>
+    <path d="M20 9h2"/>
+    <path d="M20 15h2"/>
+    <path d="M9 2v2"/>
+    <path d="M9 20v2"/>
+  </g>
+</svg>

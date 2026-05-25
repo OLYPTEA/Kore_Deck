@@ -8,6 +8,26 @@ import { useStore } from "@/store";
 const WS_URL             = "ws://localhost:8765";
 const RECONNECT_DELAY_MS = 3000;
 
+// ─── Singleton WS partagé ────────────────────────────────────────────────────
+// useSerial() est appelé une seule fois (dans App.tsx), mais d'autres composants
+// — boutons média, toggles, etc. — doivent pouvoir envoyer des actions à l'agent
+// sans recevoir le hook par prop drilling. On expose donc l'instance WS active
+// au niveau module et un helper `sendAction()` qui s'occupe du framing JSON.
+let wsInstance: WebSocket | null = null;
+
+/**
+ * Envoie une action au format attendu par ws_bridge.py :
+ *   { "type": "action", "action": "MEDIA_PLAY" }
+ * Silencieux (warn) si la connexion n'est pas ouverte — évite de planter l'UI.
+ */
+export function sendAction(action: string): void {
+  if (wsInstance?.readyState === WebSocket.OPEN) {
+    wsInstance.send(JSON.stringify({ type: "action", action }));
+  } else {
+    console.warn("[Kore Deck] WS non connecté — action ignorée :", action);
+  }
+}
+
 export function useSerial() {
   const wsRef      = useRef<WebSocket | null>(null);
   const retryRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -78,6 +98,7 @@ export function useSerial() {
 
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
+    wsInstance    = ws;   // Partage la connexion avec sendAction()
 
     ws.onopen = () => {
       if (!mountedRef.current) return;
@@ -88,6 +109,7 @@ export function useSerial() {
     ws.onmessage = e => handleMessage(e.data);
 
     ws.onclose = () => {
+      if (wsInstance === ws) wsInstance = null;   // évite d'utiliser un WS fermé
       if (!mountedRef.current) return;
       setConnection({ status: "disconnected" });
       if (settingsRef.current.autoReconnect) {

@@ -1,33 +1,103 @@
 @import "tailwindcss";
 
-/* ─── Design tokens ───────────────────────────────────────────────────────── */
-:root {
-  --bg:        #0C0C0E;
-  --s0:        #141416;   /* card surface          */
-  --s1:        #1A1A1D;   /* elevated / hover      */
-  --s2:        #212127;   /* active / pressed      */
+/* Fonts : chargées via <link> dans index.html (preconnect + display=swap).
+   On évite le @import CSS qui bloque le rendu critique. */
 
+/* ─── Design tokens ──────────────────────────────────────────────────────── */
+:root {
+  /* Legacy tokens (compat avec composants existants) */
+  --bg:        #0C0C0E;
+  --s0:        #141416;
+  --s1:        #1A1A1D;
+  --s2:        #212127;
   --b0: rgba(255,255,255,0.06);
   --b1: rgba(255,255,255,0.10);
   --b2: rgba(255,255,255,0.16);
-
   --t0: #ECECEF;
   --t1: #8E8EA0;
   --t2: #4E4E60;
-
-  --accent:    #6366F1;
-  --accent-hi: #818CF8;
-  --accent-dim: rgba(99,102,241,0.14);
-  --accent-bd:  rgba(99,102,241,0.40);
-
   --green: #22C55E;
   --red:   #EF4444;
   --amber: #F59E0B;
 
-  --r-xs: 5px;
-  --r-sm: 7px;
-  --r-md: 10px;
-  --r-lg: 13px;
+  /* Fond profond — refonte */
+  --bg-0: oklch(0.14 0.005 270);
+  --bg-1: oklch(0.17 0.006 270);
+  --bg-2: oklch(0.22 0.008 270);
+
+  /* Glass surfaces */
+  --glass-fill:        rgba(255,255,255,0.045);
+  --glass-fill-strong: rgba(255,255,255,0.075);
+  --glass-fill-soft:   rgba(255,255,255,0.025);
+  --glass-border:      rgba(255,255,255,0.085);
+  --glass-border-soft: rgba(255,255,255,0.05);
+  --glass-highlight:   rgba(255,255,255,0.10);
+  --glass-shadow:      0 8px 32px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.30);
+  /* Blur passé de 60px → 20px pour perfs. Au-delà de ~24px le compositor
+     WebView2 ne maintient pas 60 fps avec 8+ surfaces glass simultanées
+     (chaque frame doit re-flouter toute la zone derrière chaque card).
+     20px reste visuellement glassy mais coûte ~3× moins en GPU. */
+  --glass-blur:        blur(20px) saturate(140%);
+  --glass-blur-light:  blur(14px) saturate(130%);
+
+  /* Shadows — échelle cohérente pour cards, hover, dropdowns, modals.
+     À utiliser au lieu de hardcoder des box-shadow custom partout. */
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.30);                                      /* subtle press */
+  --shadow-2: 0 4px 14px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06); /* card rest */
+  --shadow-3: 0 14px 36px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.08); /* card hover */
+  --shadow-4: 0 24px 60px rgba(0,0,0,0.55);                                    /* modal / floating */
+  --shadow-dock: 0 18px 50px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(255,255,255,0.05);
+
+  /* Texte */
+  --text-1: oklch(0.97 0.005 270);
+  --text-2: oklch(0.78 0.008 270);
+  --text-3: oklch(0.58 0.010 270);
+  --text-4: oklch(0.42 0.012 270);
+
+  /* Accents — pilotés par PaletteApplier */
+  --accent:      #0A84FF;
+  --accent-hi:   #5AC8FA;
+  --accent-soft: rgba(10,132,255,0.18);
+  --accent-glow: rgba(10,132,255,0.45);
+  --accent-dim:  rgba(10,132,255,0.14);
+  --accent-bd:   rgba(10,132,255,0.40);
+
+  --cat-home:  #5E5CE6;
+  --cat-3d:    #30D158;
+  --cat-focus: #FF9F0A;
+  --cat-game:  #FF453A;
+
+  --ok:   #30D158;
+  --warn: #FF9F0A;
+  --err:  #FF453A;
+
+  /* Radii */
+  --r-xs: 8px;
+  --r-sm: 12px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  /* Espacements — --gap-grid est consommé par le Dashboard.
+     12px = valeur du proto Claude Design (photo 2) où les widgets fittent sans crop.
+     Combiné à la fenêtre Tauri à 820px de haut, ça laisse ~100px par rangée. */
+  --gap-grid: 12px;
+
+  /* Background du Dashboard — overridable par [data-bg-theme="lunar"] */
+  --bg-pattern:
+    radial-gradient(ellipse 90% 60% at 20% 0%,   rgba(94,92,230,0.18),  transparent 60%),
+    radial-gradient(ellipse 70% 50% at 100% 100%, rgba(10,132,255,0.14), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(255,159,10,0.06), transparent 50%),
+    var(--bg-0);
+
+  /* Animations */
+  --d-fast: 140ms;
+  --d-base: 220ms;
+  --d-slow: 320ms;
+  --ease:     cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* ─── Reset ─────────────────────────────────────────────────────────────── */
@@ -35,34 +105,67 @@
 
 html, body, #root {
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
-               "Segoe UI Variable", system-ui, sans-serif;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11", "tnum";
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   user-select: none;
   overflow: hidden;
-  color: var(--t0);
+  color: var(--text-1);
 }
 
-/* ─── Background ─────────────────────────────────────────────────────────── */
+/* ─── Background — piloté par --bg-pattern ──────────────────────────────── */
 body {
-  background:
-    radial-gradient(ellipse 65% 45% at 0% 0%,   rgba(99,102,241,0.06)  0%, transparent 65%),
-    radial-gradient(ellipse 40% 30% at 100% 100%, rgba(99,102,241,0.04) 0%, transparent 55%),
-    var(--bg);
+  background: var(--bg-pattern);
+  transition: background var(--d-slow) var(--ease);
+}
+
+/* Fade-in du root au premier mount — évite le flash blanc avant que React
+   ait monté les composants. Petit, rapide, pas une animation décorative. */
+#root {
+  animation: kd-fade-in 240ms var(--ease-out) both;
+}
+
+/* Thème lunaire : gradient lumineux (lumière rasante haut-droite) */
+/* Activé via <html data-bg-theme="lunar"> par BgThemeApplier dans App.tsx. */
+/* Ne touche QUE le background — glass / texte / accents restent identiques. */
+[data-bg-theme="lunar"] {
+  --bg-pattern:
+    radial-gradient(ellipse 120% 95% at 92% 8%,
+      #F5F5F8 0%,
+      #D8D8DC 18%,
+      #9A9AA0 42%,
+      #5A5A60 68%,
+      #2A2A2E 88%,
+      #1A1A1D 100%);
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+button {
+  background: none; border: none; cursor: pointer; padding: 0;
+  /* touch-action: manipulation supprime le delay 300ms sur les WebViews. */
+  touch-action: manipulation;
 }
 
 /* ─── Scrollbar ──────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.09); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); }
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08); border-radius: 999px;
+  transition: background var(--d-fast) var(--ease);
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
 
 /* ─── Focus ──────────────────────────────────────────────────────────────── */
+/* Ring soft (box-shadow inset glow + outline fin) plutôt qu'outline brut.
+   Suit le border-radius de l'élément naturellement, sans halo carré. */
+*:focus { outline: none; }
 *:focus-visible {
-  outline: 1.5px solid var(--accent-bd);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
+  border-radius: inherit;
 }
 
 /* ─── Inputs ─────────────────────────────────────────────────────────────── */
@@ -70,32 +173,178 @@ input, select, textarea {
   background: rgba(0,0,0,0.28);
   border: 1px solid var(--b1);
   border-radius: var(--r-xs);
-  color: var(--t0);
+  color: var(--text-1);
   font-size: 12px;
-  font-family: inherit;
-  padding: 6px 10px;
+  padding: 7px 10px;       /* hauteur ~30px, alignée avec les boutons compacts */
   width: 100%;
-  transition: border-color 0.12s, background 0.12s;
+  transition: border-color var(--d-fast) var(--ease),
+              background var(--d-fast) var(--ease);
 }
 input:hover, select:hover { border-color: var(--b2); }
 input:focus, select:focus, textarea:focus {
   outline: none;
-  border-color: var(--accent-bd);
+  border-color: var(--accent);
   background: rgba(0,0,0,0.40);
 }
-input::placeholder, textarea::placeholder { color: var(--t2); }
-select option { background: #141416; color: var(--t0); }
+input::placeholder, textarea::placeholder { color: var(--text-3); }
+select option { background: #141416; color: var(--text-1); }
 
-/* ─── Buttons ────────────────────────────────────────────────────────────── */
 button {
-  cursor: pointer;
-  font-family: inherit;
   font-size: 13px;
   border-radius: var(--r-sm);
-  transition: all 0.12s;
+  transition: background var(--d-fast) var(--ease),
+              border-color var(--d-fast) var(--ease),
+              color var(--d-fast) var(--ease),
+              transform var(--d-fast) var(--ease);
 }
 button:active { transform: scale(0.97); }
 
-/* ─── Keyframes ──────────────────────────────────────────────────────────── */
+/* ─── Utility CTA — 3 variantes canoniques ───────────────────────────────── */
+/* Toutes hauteur 36px, padding horizontal 16px, pill. Les composants peuvent
+   override via style inline mais doivent rester proches de ces valeurs. */
+.kd-cta {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--r-pill);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--d-fast) var(--ease),
+              border-color var(--d-fast) var(--ease),
+              box-shadow var(--d-fast) var(--ease),
+              color var(--d-fast) var(--ease);
+}
+.kd-cta--primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 6px 18px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.22);
+}
+.kd-cta--primary:hover { filter: brightness(1.08); }
+.kd-cta--secondary {
+  background: var(--glass-fill);
+  border-color: var(--glass-border);
+  color: var(--text-1);
+}
+.kd-cta--secondary:hover { background: var(--glass-fill-strong); }
+.kd-cta--ghost {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.kd-cta--ghost:hover { background: var(--accent-dim); }
+.kd-cta--sm { height: 30px; padding: 0 12px; font-size: 12px; }
+
+/* ─── Type mono ──────────────────────────────────────────────────────────── */
+.kd-mono {
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-4);
+  font-weight: 500;
+}
+
+/* ─── Glass utility ──────────────────────────────────────────────────────── */
+.glass {
+  position: relative;
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  /* Promotion GPU layer pour cacher le blur entre frames (gain perf majeur).
+     `contain: layout paint` RETIRÉ — il interagissait mal avec backdrop-filter
+     dans WebView2 et créait des bandes parasites en bas des cards (le clipping
+     du paint modifiait la zone de capture du blur). */
+  transform: translateZ(0);
+}
+.glass::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(to bottom, var(--glass-highlight) 0%, transparent 22%);
+  pointer-events: none;
+  opacity: 0.8;
+}
+/* Note : `.glass::after` global retiré.
+   Le pseudo-élément créait des "rectangles" parasites sur certains widgets
+   (CPU, Spotify, hero ESP32) à cause d'interactions complexes avec :hover CSS
+   et l'ordre de paint des pseudo-éléments dans WebView2.
+   Solution : chaque composant qui veut un glow hover le déclare inline avec
+   `opacity: hover ? 1 : 0` piloté par state React (pattern éprouvé sur
+   ProfileCard, qui n'a jamais eu le bug). Voir WidgetShell.tsx. */
+.glass-strong { background: var(--glass-fill-strong); }
+.glass-soft   { background: var(--glass-fill-soft); }
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
 @keyframes spin  { to { transform: rotate(360deg); } }
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@keyframes kd-wiggle-a {
+  0%, 100% { transform: rotate(-0.35deg) translateY(0); }
+  50%      { transform: rotate( 0.35deg) translateY(-0.5px); }
+}
+@keyframes kd-wiggle-b {
+  0%, 100% { transform: rotate( 0.35deg) translateY(0); }
+  50%      { transform: rotate(-0.35deg) translateY(-0.5px); }
+}
+.wiggle-a { animation: kd-wiggle-a 0.46s ease-in-out infinite; }
+.wiggle-b { animation: kd-wiggle-b 0.42s ease-in-out infinite; }
+
+@keyframes kd-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--accent-glow); }
+  50%      { opacity: 0.7; box-shadow: 0 0 0 6px transparent; }
+}
+.pulse { animation: kd-pulse 2s var(--ease) infinite; }
+
+@keyframes kd-fade-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes kd-scale-in { from { transform: scale(0.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* ─── Transitions de page (slide élastique style Apple) ──────────────────── */
+/* Spring physique : slide 44px → léger overshoot (-6px) → settle à 0.
+   La courbe ease-out-quint accompagne le rebond. Durée 540ms = sensation
+   "élastique mais snappy" iOS. Direction portée par [data-page-dir]. */
+.kd-page-anim {
+  animation: kd-page-fwd 540ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+.kd-page-anim[data-page-dir="backward"] { animation-name: kd-page-back; }
+.kd-page-anim[data-page-dir="initial"]  { animation: none; }
+
+@keyframes kd-page-fwd {
+  0%   { opacity: 0; transform: translate3d(44px, 0, 0); }
+  55%  { opacity: 1; transform: translate3d(-6px, 0, 0); }
+  78%  { transform: translate3d(2px, 0, 0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes kd-page-back {
+  0%   { opacity: 0; transform: translate3d(-44px, 0, 0); }
+  55%  { opacity: 1; transform: translate3d(6px, 0, 0); }
+  78%  { transform: translate3d(-2px, 0, 0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+/* Respect du système : pas d'animation si l'utilisateur l'a demandé. */
+@media (prefers-reduced-motion: reduce) {
+  .kd-page-anim { animation: none !important; }
+  .wiggle-a, .wiggle-b, .pulse { animation: none !important; }
+}
+
+/* Mic level bars */
+@keyframes kd-mic-0 { 0%,100%{height:6px}  50%{height:18px} }
+@keyframes kd-mic-1 { 0%,100%{height:8px}  50%{height:14px} }
+@keyframes kd-mic-2 { 0%,100%{height:4px}  50%{height:20px} }
+@keyframes kd-mic-3 { 0%,100%{height:10px} 50%{height:16px} }
+@keyframes kd-mic-4 { 0%,100%{height:6px}  50%{height:22px} }
+@keyframes kd-mic-5 { 0%,100%{height:12px} 50%{height:14px} }
+@keyframes kd-mic-6 { 0%,100%{height:5px}  50%{height:18px} }
+@keyframes kd-mic-7 { 0%,100%{height:8px}  50%{height:16px} }
+@keyframes kd-mic-8 { 0%,100%{height:10px} 50%{height:20px} }
+@keyframes kd-mic-9 { 0%,100%{height:7px}  50%{height:14px} }
+
+.tnum  { font-variant-numeric: tabular-nums; }
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

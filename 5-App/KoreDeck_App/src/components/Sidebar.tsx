@@ -30,8 +30,10 @@ export function Sidebar() {
     <aside style={{
       width: 200, minWidth: 200,
       display: "flex", flexDirection: "column",
-      height: "100vh",
-      background: "#0A0A0C",
+      height: "100%",
+      background: "rgba(10, 10, 12, 0.65)",
+      backdropFilter: "var(--glass-blur-light)",
+      WebkitBackdropFilter: "var(--glass-blur-light)",
       borderRight: "1px solid rgba(255,255,255,0.07)",
     }}>
 

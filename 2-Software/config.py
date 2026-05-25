@@ -56,6 +56,8 @@ class TimingConfig:
     ui_push_interval : float = 0.2    # Push stats vers Tauri (5 Hz, suffisant pour de l'UI)
     pomodoro_tick    : float = 0.25   # Vérification expiration Pomodoro (résolution seconde)
     main_loop_sleep  : float = 0.005  # Repos boucle principale — évite 100% CPU
+    dnd_check_interval : float = 10.0   # Relecture registre DND (Focus Assist change rarement)
+    obs_check_interval : float = 15.0   # Scan process pour OBS (process_iter = coûteux)
 
     def __post_init__(self) -> None:
         _clamp(self.send_interval,    0.01, 5.0,  "timing.send_interval")
@@ -64,6 +66,8 @@ class TimingConfig:
         _clamp(self.ui_push_interval, 0.05, 5.0,  "timing.ui_push_interval")
         _clamp(self.pomodoro_tick,    0.05, 1.0,  "timing.pomodoro_tick")
         _clamp(self.main_loop_sleep,  0.001, 0.1, "timing.main_loop_sleep")
+        _clamp(self.dnd_check_interval, 1.0, 120.0, "timing.dnd_check_interval")
+        _clamp(self.obs_check_interval, 1.0, 120.0, "timing.obs_check_interval")
 
 
 @dataclass

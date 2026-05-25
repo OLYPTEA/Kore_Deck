@@ -10,6 +10,10 @@ import {
   CategoryId, ButtonConfig, PotConfig,
   DEFAULT_BUTTONS, DEFAULT_POTS, CATEGORIES,
 } from "@/types";
+import type { PaletteId } from "@/lib/palettes";
+
+// Thème de background — n'affecte QUE le gradient global, pas la skin glass/texte.
+export type BgTheme = "dark" | "lunar";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // État initial
@@ -65,6 +69,8 @@ interface StreamDeckStore {
 
   // --- UI
   selectedPage:   "dashboard" | "config" | "profiles" | "settings";
+  palette:        PaletteId;
+  bgTheme:        BgTheme;
 
   // ─── Actions ───────────────────────────────────────────────────────────────
 
@@ -106,6 +112,12 @@ interface StreamDeckStore {
   // Navigation
   setPage:            (page: StreamDeckStore["selectedPage"]) => void;
 
+  // Palette de couleurs (cosmétique pure)
+  setPalette:         (id: PaletteId) => void;
+
+  // Thème de background (cosmétique pure)
+  setBgTheme:         (id: BgTheme) => void;
+
   // Getters dérivés
   getActiveProfile:   () => Profile | undefined;
   getActiveCategory:  () => import("@/types").CategoryConfig | undefined;
@@ -129,6 +141,8 @@ export const useStore = create<StreamDeckStore>()(
       },
       settings:      DEFAULT_SETTINGS,
       selectedPage:  "dashboard",
+      palette:       "default",
+      bgTheme:       "dark",
 
       // ─── Profils ───────────────────────────────────────────────────────
       setActiveProfile: (id) => {
@@ -249,6 +263,12 @@ export const useStore = create<StreamDeckStore>()(
       // ─── Navigation ────────────────────────────────────────────────────
       setPage: (page) => set({ selectedPage: page }),
 
+      // ─── Palette ───────────────────────────────────────────────────────
+      setPalette: (id) => set({ palette: id }),
+
+      // ─── Background ────────────────────────────────────────────────────
+      setBgTheme: (id) => set({ bgTheme: id }),
+
       // ─── Getters dérivés ───────────────────────────────────────────────
       getActiveProfile: () =>
         get().profiles.find((p) => p.id === get().activeProfileId),
@@ -269,6 +289,8 @@ export const useStore = create<StreamDeckStore>()(
         profiles:        state.profiles,
         activeProfileId: state.activeProfileId,
         settings:        state.settings,
+        palette:         state.palette,
+        bgTheme:         state.bgTheme,
       }),
     }
   )

@@ -37,7 +37,7 @@ les actions boutons et les valeurs potentiomètres.
 ## Installation des dépendances
 
 ```bash
-# Depuis le dossier Kore Deck/KoreDeck_App/
+# Depuis le dossier Kore Deck/5-App/
 npm install
 ```
 
