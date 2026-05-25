@@ -147,6 +147,28 @@ The project uses filtering techniques to ensure the accuracy of analog readings:
 
 ---
 
+# Application 
+
+Application Customisable 
+
+- **Plusieurs Mods Disponible `Home, 3D Making, Focus, Game`
+
+-  ** 2 Thèmes : `Sombre & Lunaire`
+
+-  ** 6 palettes de couleurs : `Aurore`, `Sunset`, `Forêt`, `Océan`, `Vibrant`,` Graphite`
+
+-  ** Gestion des vitesses de transmition : `(Attention 100ms recomandé, 50ms min)`
+
+  <img width="1273" height="812" alt="ScreenApp1" src="https://github.com/user-attachments/assets/c3499892-e996-4577-af53-d0a4670b668f" />
+
+  <img width="1275" height="812" alt="ScreenApp2" src="https://github.com/user-attachments/assets/e9041d9e-3464-4a3b-abca-d6a0b7b8c178" />
+
+  <img width="1272" height="813" alt="ScreenApp3" src="https://github.com/user-attachments/assets/32e8ccc3-5228-4c10-a122-4d6504c619f9" />
+
+---
+
+
+
 # Structure du Dépôt/Structure of the Repository
 
 ```text
