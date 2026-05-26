@@ -172,11 +172,11 @@ Application Customisable
 # Structure du Dépôt/Structure of the Repository
 
 ```text
-├── Hardware/           # Fichiers STEP/STL (Fusion 360)/STEP/STL files (Fusion 360)
-├── Firmware/           # Code source ESP32 (Arduino IDE / PlatformIO)/ESP32 source code (Arduino IDE / PlatformIO)
-├── DWIN_Project/       # Fichiers de configuration DGUS II (Interface graphique)/DGUS II Configuration Files (Graphical Interface)
-├── Scripts_PC/         # Script de détection d'application (Python/C#)/Application detection script (Python/C#)
-└── Assets/             # Icônes, vidéos et ressources graphiques/Icons, videos, and graphic resources
+├── 1-Hardware/          # Fichiers PCB (Gerbers/DRILL/.kicad_pro)
+├── 2-Software/          # Agent Python/Code Logiciel
+├── 3-Firmware/          # Code source ESP32 (Arduino IDE / PlatformIO)/ESP32 source code (Arduino IDE / PlatformIO)
+├── 4-Modele/            # Fichiers STEP/STL (Fusion 360)/STEP/STL files (Fusion 360)
+└── picture/             # Icônes, vidéos et ressources graphiques/Icons, videos, and graphic resources
 ```
 
 ---
