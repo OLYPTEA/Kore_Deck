@@ -1,8 +1,7 @@
 # KORE DECK
 
-<p align="center">
-  <img src="pictures/Picture1.jpg" width="1000">
-</p>
+<img width="3840" height="2160" alt="6822171f-2104-4424-87fb-363b0579082a" src="https://github.com/user-attachments/assets/a691ff80-48a3-41b8-980c-e3c321be0faf" />
+
 
 <p align="center">
   <img src="https://img.shields.io/badge/Status-En_Développement-orange">
