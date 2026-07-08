@@ -1,4 +1,4 @@
-# KORE DECK
+# Kore Deck
 
 <img width="3840" height="2160" alt="6822171f-2104-4424-87fb-363b0579082a" src="https://github.com/user-attachments/assets/a691ff80-48a3-41b8-980c-e3c321be0faf" />
 
@@ -10,7 +10,7 @@
 </p>
 
 <h3 align="center">
-Un Hub de Control Modulaire pour PC et Robotique/A Modular Stream Deck & Robotics Control Hub (cf : Robotic_Arm)
+Un Hub de Control Modulaire pour PC et Robotique
 </h3>
 
 ---
@@ -22,213 +22,46 @@ https://github.com/user-attachments/assets/3f7520e6-ee07-4d92-a84f-97e8f2b0d568
 
 
 
+<img width="3864" height="2128" alt="carte kore deck v1 vf" src="https://github.com/user-attachments/assets/c3aa0c3b-1d7b-4890-b3ae-7347029e8539" />
 
-<p align="center">
-  <img src="pictures/pcb_koredeck.png" width="1000">
-</p>
 
 
 
 ---
 
-## Description
+#  Stream Deck DIY & Hub Modulaire (ESP32-S3)
 
-Ce projet est un **Stream Deck DIY** développé dans le but d'être modulaire.  
-Conçu autour d'un **ESP32-S3**, il permet de piloter des raccourcis PC, de monitorer des ressources, mais aussi de servir de **Hub de contrôle** pour des périphériques externes (bras robotique, capteurs) via un port d'extension dédié.
-
-This project is a **DIY Stream Deck** designed to be modular.  
-Built around an **ESP32-S3**, it allows you to control PC shortcuts, monitor system resources, and serve as a **control hub** for external devices (such as robotic arms and sensors) via a dedicated expansion port.
+Version complète du projet de **Stream Deck DIY** modulaire développé par **OLYPTEA**.
 
 ---
 
-
-# Spécifications Matérielles
-
-| Composant | Détails |
-| :--- | :--- |
-| **Microcontrôleur** | ESP32-S3 DevKit N16R8 (16MB Flash / 8MB PSRAM) |
-| **Écran** | DWIN HMI 960x240 (Interface UART, protocole DGUS II) |
-| **Capteurs** | 7x Switchs mécaniques (Cherry MX) + 4x Potentiomètres analogiques |
-| **Alimentation** | USB-C natif (Compatible **Thunderbolt** pour forte puissance) |
-| **Modularité** | Boîtier CAO avec pied indépendant et port d'extension I2C |
-
----
-
-# Points Forts du Projet
-
-## 1. Conception Modulaire (CAO)
-
-Le boîtier a été conçu sous **Fusion 360** avec une approche modulaire :
-
-- **Pied indépendant :**  
-  Permet d'adapter différents angles ou supports (pince de bureau, bras articulé).
-
-- **Port d'extension :**  
-  Sortie des ports non-utilisés (SDA/SCL, 5V, GND) sur le côté pour connecter des modules sans ouvrir le boîtier.
-
-- **Modularité du Software/Firmware**
-  Pensé dans le but d'être mobile et évolutif (rajout facile à intégrer)
-
-
-The Case was designed in **Fusion 360** using a modular approach:
-
-- **Detachable stand:**  
-  Allows for different angles or mounts (desk clamp, articulated arm).
-
-- **Expansion port:**  
-  Unused ports (SDA/SCL, 5V, GND) are routed to the side to connect modules without opening the enclosure.
-
-- **Software/Firmware Modularity**
-  Designed to be portable and scalable (easy to integrate new features)
-
-
----
-
-## 2. Hub Robotique/Robotics Hub
-
-Grâce au port d'extension, le Stream Deck peut piloter un **bras robotique** (servomoteurs) via un driver **PCA9685**.
-
-- **Mapping dynamique :**  
-  Les potentiomètres contrôlent directement les angles des servos lorsque le profil `Robot` est sélectionné.
-
-- **Affichage temps réel :**  
-  L'écran DWIN affiche l'état et la position de chaque articulation.
-
-Thanks to the expansion port, the Stream Deck can control a **robotic arm** (servo motors) via a **PCA9685** driver.
-
-- **Dynamic mapping:**  
-  The potentiometers directly control the servo angles when the `Robot` profile is selected.
-
-- **Real-time display:**  
-  The DWIN screen displays the status and position of each joint.
-
----
-
-## 3. Gestion de l'Énergie/Energy Management
-
-Optimisation pour le **Thunderbolt** :
-
-- Alimentation directe des périphériques (Écran, Servos) via la ligne **5V/Vin** pour préserver le régulateur interne de l'ESP32.
-
-- Filtrage matériel par condensateurs (`470µF` → `1000µF`) pour stabiliser les pics de courant des moteurs.
-
-Optimization for **Thunderbolt**:
-
-- Direct power supply to peripherals (display, servos) via the **5V/Vin** line to preserve the ESP32’s internal voltage regulator.
-
-- Hardware filtering using capacitors (`470µF` → `1000µF`) to stabilize motor current spikes.
-
----
-
-# Schéma de Câblage (Résumé)/Wiring Diagram (Summary)
-
-Le projet utilise des techniques de filtrage pour garantir la précision des lectures analogiques :
-
-- **Potentiomètres :**  
-  Condensateurs de `100nF` pour le lissage du signal.
-
-- **Boutons :**  
-  Condensateurs de `10nF` pour le debounce matériel.
-
-- **Communication Écran :**  
-  Liaison série directe (`3.3V TTL`) sur `Rx2/Tx2`.
-
-The project uses filtering techniques to ensure the accuracy of analog readings:
-
-- **Potentiometers:**  
-  `100nF` capacitors for signal smoothing.
-
-- **Buttons:**  
-  `10nF` capacitors for hardware debouncing.
-
-- **Display communication:**  
-  Direct serial connection (`3.3V TTL`) on `Rx2/Tx2`.
-
----
-
-# Application 
-
-Application Customisable 
-
-- **Plusieurs Mods Disponible `Home, 3D Making, Focus, Game`
-
--  ** 2 Thèmes : `Sombre & Lunaire`
-
--  ** 6 palettes de couleurs : `Aurore`, `Sunset`, `Forêt`, `Océan`, `Vibrant`,` Graphite`
-
--  ** Gestion des vitesses de transmition : `(Attention 100ms recomandé, 50ms min)`
-
-  <img width="1273" height="812" alt="ScreenApp1" src="https://github.com/user-attachments/assets/c3499892-e996-4577-af53-d0a4670b668f" />
-
-  <img width="1275" height="812" alt="ScreenApp2" src="https://github.com/user-attachments/assets/e9041d9e-3464-4a3b-abca-d6a0b7b8c178" />
-
-  <img width="1272" height="813" alt="ScreenApp3" src="https://github.com/user-attachments/assets/32e8ccc3-5228-4c10-a122-4d6504c619f9" />
-
----
-
-
-
-# Structure du Dépôt/Structure of the Repository
-
-```text
-├── 1-Hardware/          # Fichiers PCB (Gerbers/DRILL/.kicad_pro)
-├── 2-Software/          # Agent Python/Code Logiciel
-├── 3-Firmware/          # Code source ESP32 (Arduino IDE / PlatformIO)/ESP32 source code (Arduino IDE / PlatformIO)
-├── 4-Modele/            # Fichiers STEP/STL (Fusion 360)/STEP/STL files (Fusion 360)
-└── picture/             # Icônes, vidéos et ressources graphiques/Icons, videos, and graphic resources
-```
-
----
-
-# Roadmap
-
-- [ ] Interface UI avancée/Advanced UI
-- [ ] Gestion multi-profils/Multi-profile management
-- [ ] Intégration MQTT/MQTT integration
-- [ ] Contrôle robotique avancé/Advanced robotics control
-- [ ] Support Wi-Fi / Bluetooth/Wi-Fi / Bluetooth support
-- [ ] Intégration Home Assistant/Home Assistant integration
-
----
-
-# Technologies Utilisées/Technologies Used
-
-- **ESP32-S3**
-- **DGUS II / DWIN HMI**
-- **Fusion 360**
-- **Arduino / PlatformIO**
-- **Python / C#**
-- **I2C / UART**
-
----
-
-# Auteur/Author
-
-Projet conçu et développé par **OLYPTEA** (Sacha Gibert).
-
-Project designed and developed by **OLYPTEA** (Sacha Gibert).
-
-GitHub :  
-https://github.com/OLYPTEA
-
----
-**Mention à :**
-* **Andrei Doncescu** : https://homepages.laas.fr/adoncesc/SystemEmbed/Filtrage.pdf 
-* **Random Nerds Tutorial** : https://randomnerdtutorials.com/esp32-save-data-permanently-preferences/ 
-* **cppreference.com** : https://en.cppreference.com/cpp/language/static_cast
-* **Peng Zhihui** : https://github.com/peng-zhihui/HoloCubic <3
-* **STMicroelectronics** — AN2834 : https://www.st.com/resource/en/application_note/cd00211314-how-to-optimize-the-adc-accuracy-in-the-stm32-                                                          mcustmicroelectronics.pdf
-* **Claude code** : Débogage
-* **Espressif Systems** : https://documentation.espressif.com/esp32-s3_datasheet_en.pdf
-* **Tauri** : http://github.com/tauri-apps/tauri/blob/dev/ARCHITECTURE.md https://github.com/tauri-apps/awesome-tauri
-
-
-
----
-
-Merci d'avoir pris le temps de regarder le projet
-
-Thank you for taking the time to look at the project
-
----
+##  Présentation
+Ce projet est un boîtier de contrôle polyvalent et évolutif conçu autour d'un **ESP32-S3**. Il permet de gérer des raccourcis PC, de monitorer des ressources système et sert de **hub de contrôle** pour des périphériques externes (robotique, capteurs) via son port d'extension.
+
+##  Spécifications Matérielles
+* **Microcontrôleur :** ESP32-S3 DevKit N16R8 (16MB Flash / 8MB PSRAM)
+* **Écran :** DWIN HMI 960x240 (Interface UART, protocole DGUS II)
+* **Contrôles :** 7x Switchs mécaniques (Cherry MX) + 4x Potentiomètres analogiques
+* **Alimentation :** USB-C natif (compatible Thunderbolt pour forte puissance)
+* **Filtrage Électronique :** Condensateurs dédiés pour le lissage des signaux (100nF), le debounce matériel (10nF) et la stabilisation des moteurs (470µF à 1000µF).
+
+##  Points Forts & Fonctionnalités
+* **Conception Modulaire (CAO) :** Boîtier conçu sous *Fusion 360* avec un pied indépendant/interchangeable et un port d'extension latéral (SDA/SCL, 5V, GND).
+* **Hub Robotique :** Pilotage dynamique d'un bras robotique (servomoteurs) via un driver *PCA9685* avec retour visuel en temps réel sur l'écran.
+* **Application Customisable :** * Modes disponibles : `Home`, `3D Making`, `Focus`, `Game`
+  * Visuels : 2 thèmes (`Sombre` & `Lunaire`) et 6 palettes de couleurs (`Aurore`, `Sunset`, `Forêt`, `Océan`, `Vibrant`, `Graphite`)
+
+##  Structure du Dépôt
+* `1-Hardware/` : Fichiers PCB (Gerbers, KiCad)
+* `2-Software/` : Agent Python / Code Logiciel
+* `3-Firmware/` : Code source ESP32 (Arduino / PlatformIO)
+* `4-Modele/` : Fichiers 3D (STEP/STL Fusion 360)
+* `picture/` : Ressources graphiques et icônes
+
+## Roadmap
+- [x] Interface utilisateur (UI) avancée
+- [X] Gestion multi-profils
+- [ ] Intégration MQTT & Home Assistant
+- [ ] Support Wi-Fi / Bluetooth
+- [ ] Contrôle robotique avancé
 
